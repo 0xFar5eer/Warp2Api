@@ -7,12 +7,12 @@ import uuid
 from typing import Any, Dict, List, Optional
 import os
 
-import requests
 from fastapi import APIRouter, HTTPException, Depends, Header
 from fastapi.responses import StreamingResponse
 from fastapi.security import APIKeyHeader, APIKeyQuery
 
 from .logging import logger
+from .http_client import OptimizedSyncClient, get_sync_client
 
 from .models import ChatCompletionsRequest, ChatMessage
 from .reorder import reorder_messages_for_anthropic
@@ -102,9 +102,12 @@ def list_models(api_key: Optional[str] = Depends(get_api_key)):
     if bridge_api_key:
         headers["X-API-Key"] = bridge_api_key
     
+    # Use optimized HTTP client
+    client = get_sync_client()
+    
     try:
-        # Don't use proxy for localhost connections
-        resp = requests.get(f"{BRIDGE_BASE_URL}/v1/models", headers=headers, timeout=10.0, proxies={'http': None, 'https': None})
+        # Use caching for model listing
+        resp = client.get(f"{BRIDGE_BASE_URL}/v1/models", headers=headers, timeout=10.0, use_cache=True)
         if resp.status_code != 200:
             raise HTTPException(resp.status_code, f"bridge_error: {resp.text}")
         return resp.json()
@@ -211,20 +214,21 @@ async def chat_completions(
                 yield chunk
         return StreamingResponse(_agen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "Connection": "keep-alive"})
 
-    def _post_once() -> requests.Response:
+    # Use optimized HTTP client
+    client = get_sync_client()
+    
+    def _post_once() -> Any:
         # Get API key from environment for internal bridge requests
         bridge_api_key = os.getenv("API_KEY")
         headers = {}
         if bridge_api_key:
             headers["X-API-Key"] = bridge_api_key
         
-        # Don't use proxy for localhost connections
-        return requests.post(
+        return client.post(
             f"{BRIDGE_BASE_URL}/api/warp/send_stream",
             json={"json_data": packet, "message_type": "warp.multi_agent.v1.Request"},
             headers=headers,
-            timeout=(5.0, 180.0),
-            proxies={'http': None, 'https': None}
+            timeout=(5.0, 180.0)
         )
 
     try:
@@ -236,8 +240,8 @@ async def chat_completions(
                 headers = {}
                 if bridge_api_key:
                     headers["X-API-Key"] = bridge_api_key
-                # Don't use proxy for localhost connections
-                r = requests.post(f"{BRIDGE_BASE_URL}/api/auth/refresh", headers=headers, timeout=10.0, proxies={'http': None, 'https': None})
+                # Try refresh endpoint
+                r = client.post(f"{BRIDGE_BASE_URL}/api/auth/refresh", headers=headers, timeout=10.0)
                 logger.warning("[OpenAI Compat] Bridge returned 429. Tried JWT refresh -> HTTP %s", getattr(r, 'status_code', 'N/A'))
             except Exception as _e:
                 logger.warning("[OpenAI Compat] JWT refresh attempt failed after 429: %s", _e)
@@ -299,4 +303,4 @@ async def chat_completions(
         "model": model_id,
         "choices": [{"index": 0, "message": msg_payload, "finish_reason": finish_reason}],
     }
-    return final 
+    return final

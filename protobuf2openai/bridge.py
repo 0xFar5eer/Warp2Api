@@ -6,8 +6,8 @@ import time
 import uuid
 from typing import Any, Dict, Optional
 
-import requests
 from .logging import logger
+from .http_client import OptimizedSyncClient, get_sync_client
 
 from .config import (
     BRIDGE_BASE_URL,
@@ -29,6 +29,9 @@ def bridge_send_stream(packet: Dict[str, Any]) -> Dict[str, Any]:
     if api_key:
         headers["X-API-Key"] = api_key
     
+    # Use optimized HTTP client
+    client = get_sync_client()
+    
     for base in FALLBACK_BRIDGE_URLS:
         url = f"{base}/api/warp/send_stream"
         try:
@@ -38,8 +41,10 @@ def bridge_send_stream(packet: Dict[str, Any]) -> Dict[str, Any]:
                 logger.info("[OpenAI Compat] Bridge request payload: %s", json.dumps(wrapped_packet, ensure_ascii=False))
             except Exception:
                 logger.info("[OpenAI Compat] Bridge request payload serialization failed for URL %s", url)
-            # Don't use proxy for localhost connections
-            r = requests.post(url, json=wrapped_packet, headers=headers, timeout=(5.0, 180.0), proxies={'http': None, 'https': None})
+            
+            # Use optimized client with caching disabled for POST requests
+            r = client.post(url, json=wrapped_packet, headers=headers, timeout=(5.0, 180.0))
+            
             if r.status_code == 200:
                 try:
                     logger.info("[OpenAI Compat] Bridge response (raw text): %s", r.text)
@@ -74,14 +79,17 @@ def initialize_once() -> None:
     if api_key:
         headers["X-API-Key"] = api_key
     
+    # Use optimized HTTP client
+    client = get_sync_client()
+    
     for _ in range(WARMUP_INIT_RETRIES):
         try:
             ok = False
             last_err = None
             for h in health_urls:
                 try:
-                    # Don't use proxy for localhost connections
-                    resp = requests.get(h, headers=headers, timeout=5.0, proxies={'http': None, 'https': None})
+                    # Use optimized client with caching for health checks
+                    resp = client.get(h, headers=headers, timeout=5.0, use_cache=True)
                     if resp.status_code == 200:
                         ok = True
                         break
@@ -117,4 +125,4 @@ def initialize_once() -> None:
     STATE.conversation_id = resp.get("conversation_id") or STATE.conversation_id
     ret_task_id = resp.get("task_id")
     if isinstance(ret_task_id, str) and ret_task_id:
-        STATE.baseline_task_id = ret_task_id 
+        STATE.baseline_task_id = ret_task_id

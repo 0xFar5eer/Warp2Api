@@ -106,6 +106,7 @@ async def send_protobuf_to_warp_api(
                     "authorization": f"Bearer {jwt}",
                     "content-length": str(len(protobuf_bytes)),
                 }
+                
                 async with client.stream("POST", warp_url, headers=headers, content=protobuf_bytes) as response:
                     if response.status_code != 200:
                         error_text = await response.aread()
@@ -224,21 +225,21 @@ async def send_protobuf_to_warp_api(
                                                         complete_response.append(text_content)
                                                         logger.info(f"   📝 Complete Message: {text_content[:100]}...")
                     
-                    full_response = "".join(complete_response)
-                    logger.info("="*60)
-                    logger.info("📊 SSE STREAM SUMMARY")
-                    logger.info("="*60)
-                    logger.info(f"📈 Total Events Processed: {event_count}")
-                    logger.info(f"🆔 Conversation ID: {conversation_id}")
-                    logger.info(f"🆔 Task ID: {task_id}")
-                    logger.info(f"📝 Response Length: {len(full_response)} characters")
-                    logger.info("="*60)
-                    if full_response:
-                        logger.info(f"✅ Stream processing completed successfully")
-                        return full_response, conversation_id, task_id
-                    else:
-                        logger.warning("⚠️ No text content received in response")
-                        return "Warning: No response content received", conversation_id, task_id
+                full_response = "".join(complete_response)
+                logger.info("="*60)
+                logger.info("📊 SSE STREAM SUMMARY")
+                logger.info("="*60)
+                logger.info(f"📈 Total Events Processed: {event_count}")
+                logger.info(f"🆔 Conversation ID: {conversation_id}")
+                logger.info(f"🆔 Task ID: {task_id}")
+                logger.info(f"📝 Response Length: {len(full_response)} characters")
+                logger.info("="*60)
+                if full_response:
+                    logger.info(f"✅ Stream processing completed successfully")
+                    return full_response, conversation_id, task_id
+                else:
+                    logger.warning("⚠️ No text content received in response")
+                    return "Warning: No response content received", conversation_id, task_id
     except Exception as e:
         import traceback
         logger.error("="*60)
@@ -299,6 +300,7 @@ async def send_protobuf_to_warp_api_parsed(protobuf_bytes: bytes) -> tuple[str, 
                     "authorization": f"Bearer {jwt}",
                     "content-length": str(len(protobuf_bytes)),
                 }
+                
                 async with client.stream("POST", warp_url, headers=headers, content=protobuf_bytes) as response:
                     if response.status_code != 200:
                         error_text = await response.aread()
@@ -415,20 +417,20 @@ async def send_protobuf_to_warp_api_parsed(protobuf_bytes: bytes) -> tuple[str, 
                             except Exception as parse_err:
                                 logger.debug(f"Failed to parse event, skipping: {str(parse_err)[:100]}")
                                 continue
-                    
-                    full_response = "".join(complete_response)
-                    logger.info("="*60)
-                    logger.info("📊 SSE STREAM SUMMARY (parse mode)")
-                    logger.info("="*60)
-                    logger.info(f"📈 Total Events Processed: {event_count}")
-                    logger.info(f"🆔 Conversation ID: {conversation_id}")
-                    logger.info(f"🆔 Task ID: {task_id}")
-                    logger.info(f"📝 Response Length: {len(full_response)} characters")
-                    logger.info(f"🎯 Parsed Events Count: {len(parsed_events)}")
-                    logger.info("="*60)
-                    
-                    logger.info(f"✅ Stream processing completed successfully (parse mode)")
-                    return full_response, conversation_id, task_id, parsed_events
+                full_response = "".join(complete_response)
+                logger.info("="*60)
+                logger.info("📊 SSE STREAM SUMMARY (parse mode)")
+                logger.info("="*60)
+                logger.info(f"📈 Total Events Processed: {event_count}")
+                logger.info(f"🆔 Conversation ID: {conversation_id}")
+                logger.info(f"🆔 Task ID: {task_id}")
+                logger.info(f"📝 Response Length: {len(full_response)} characters")
+                logger.info(f"🎯 Parsed Events Count: {len(parsed_events)}")
+                logger.info("="*60)
+                
+                logger.info(f"✅ Stream processing completed successfully (parse mode)")
+                return full_response, conversation_id, task_id, parsed_events
+                
     except Exception as e:
         import traceback
         logger.error("="*60)
