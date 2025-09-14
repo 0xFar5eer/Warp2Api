@@ -37,11 +37,20 @@ async def main():
     warp_app = create_app()
     await startup_tasks()
     
-    # Start the warp server background thread
+    # Start the warp server background thread with optimized settings
     warp_thread = threading.Thread(
         target=uvicorn.run,
         args=(warp_app,),
-        kwargs={"host": "0.0.0.0", "port": 8000, "log_level": "info", "access_log": True},
+        kwargs={
+            "host": "0.0.0.0",
+            "port": 8000,
+            "log_level": "info",
+            "access_log": True,
+            "loop": "uvloop",  # Use uvloop for better async performance
+            "limit_concurrency": 100,  # Allow up to 100 concurrent connections
+            "limit_max_requests": None,  # No limit on total requests
+            "timeout_keep_alive": 5,  # Keep-alive timeout
+        },
         daemon=True
     )
     warp_thread.start()
@@ -57,10 +66,23 @@ async def main():
     
 
 if __name__ == "__main__":
+    import multiprocessing
+    
+    # Calculate optimal worker count (2-4 workers per CPU core for I/O bound tasks)
+    cpu_count = multiprocessing.cpu_count()
+    # Use 4 workers minimum, or 2 per CPU core up to 8 workers max
+    worker_count = min(max(4, cpu_count * 2), 8)
+    
     asyncio.run(main())
     uvicorn.run(
         openai_server,
-        host=os.getenv("HOST", "0.0.0.0"),  # Changed to 0.0.0.0 to match container setup
+        host=os.getenv("HOST", "0.0.0.0"),
         port=int(os.getenv("PORT", "8010")),
         log_level="info",
+        workers=int(os.getenv("WORKERS", worker_count)),  # Multiple workers for concurrency
+        loop="uvloop",  # Use uvloop for better async performance
+        limit_concurrency=100,  # Allow up to 100 concurrent connections per worker
+        limit_max_requests=None,  # No limit on total requests
+        timeout_keep_alive=5,  # Keep-alive timeout
+        access_log=True,
     )

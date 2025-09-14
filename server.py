@@ -568,12 +568,30 @@ async def startup_tasks():
 
 def main():
     """Main function"""
+    import multiprocessing
+    
     # Create application
     app = create_app()
+    
+    # Calculate optimal worker count (2-4 workers per CPU core for I/O bound tasks)
+    cpu_count = multiprocessing.cpu_count()
+    # Use 4 workers minimum, or 2 per CPU core up to 8 workers max
+    worker_count = min(max(4, cpu_count * 2), 8)
 
-    # Start server
+    # Start server with optimized concurrency settings
     try:
-        uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info", access_log=True)
+        uvicorn.run(
+            app,
+            host="0.0.0.0",
+            port=8000,
+            log_level="info",
+            access_log=True,
+            workers=int(os.getenv("WORKERS", worker_count)),  # Multiple workers for concurrency
+            loop="uvloop",  # Use uvloop for better async performance
+            limit_concurrency=100,  # Allow up to 100 concurrent connections per worker
+            limit_max_requests=None,  # No limit on total requests
+            timeout_keep_alive=5,  # Keep-alive timeout
+        )
     except KeyboardInterrupt:
         logger.info("Server stopped by user")
     except Exception as e:
