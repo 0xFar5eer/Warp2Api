@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Warp Protobuf编解码服务器启动文件
+Warp Protobuf Encoding/Decoding Server Startup File
 
-纯protobuf编解码服务器，提供JSON<->Protobuf转换、WebSocket监控和静态文件服务。
+Pure protobuf encoding/decoding server, providing JSON<->Protobuf conversion, WebSocket monitoring, and static file serving.
 """
 
-import os
-import asyncio
-import json
+from typing import Dict, Optional, Tuple
+import base64
 from pathlib import Path
+from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI
@@ -17,8 +17,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 from fastapi import Query, HTTPException
 from fastapi.responses import Response
-# 新增：类型导入
-from typing import Any, Dict, List
+
+# Added: Type imports
+from typing import Any
 
 from warp2protobuf.api.protobuf_routes import app as protobuf_app
 from warp2protobuf.core.logging import logger, set_log_file
@@ -29,7 +30,8 @@ from warp2protobuf.core.auth import acquire_anonymous_access_token
 from warp2protobuf.config.models import get_all_unique_models
 
 
-# ============= 工具：input_schema 清理与校验 =============
+# ============= Tools: input_schema cleaning and validation =============
+
 
 def _is_empty_value(value: Any) -> bool:
     if value is None:
@@ -76,13 +78,21 @@ def _ensure_property_schema(name: str, schema: Dict[str, Any]) -> Dict[str, Any]
     prop = dict(schema) if isinstance(schema, dict) else {}
     prop = _deep_clean(prop)
 
-    # 必填：type & description
-    if "type" not in prop or not isinstance(prop.get("type"), str) or not prop["type"].strip():
+    # Required: type & description
+    if (
+        "type" not in prop
+        or not isinstance(prop.get("type"), str)
+        or not prop["type"].strip()
+    ):
         prop["type"] = _infer_type_for_property(name)
-    if "description" not in prop or not isinstance(prop.get("description"), str) or not prop["description"].strip():
+    if (
+        "description" not in prop
+        or not isinstance(prop.get("description"), str)
+        or not prop["description"].strip()
+    ):
         prop["description"] = f"{name} parameter"
 
-    # 特殊处理 headers：必须是对象，且其 properties 不能是空
+    # Special handling for headers: must be an object, and its properties cannot be empty
     if name.lower() == "headers":
         prop["type"] = "object"
         headers_props = prop.get("properties")
@@ -97,26 +107,39 @@ def _ensure_property_schema(name: str, schema: Dict[str, Any]) -> Dict[str, Any]
                 }
             }
         else:
-            # 清理并保证每个 header 的子属性都具备 type/description
+            # Clean and ensure each header's sub-property has type/description
             fixed_headers: Dict[str, Any] = {}
             for hk, hv in headers_props.items():
                 sub = _deep_clean(hv if isinstance(hv, dict) else {})
-                if "type" not in sub or not isinstance(sub.get("type"), str) or not sub["type"].strip():
+                if (
+                    "type" not in sub
+                    or not isinstance(sub.get("type"), str)
+                    or not sub["type"].strip()
+                ):
                     sub["type"] = "string"
-                if "description" not in sub or not isinstance(sub.get("description"), str) or not sub["description"].strip():
+                if (
+                    "description" not in sub
+                    or not isinstance(sub.get("description"), str)
+                    or not sub["description"].strip()
+                ):
                     sub["description"] = f"{hk} header"
                 fixed_headers[hk] = sub
             headers_props = fixed_headers
         prop["properties"] = headers_props
-        # 处理 required 空数组
+        # Handle empty required arrays
         if isinstance(prop.get("required"), list):
-            req = [r for r in prop["required"] if isinstance(r, str) and r in headers_props]
+            req = [
+                r for r in prop["required"] if isinstance(r, str) and r in headers_props
+            ]
             if req:
                 prop["required"] = req
             else:
                 prop.pop("required", None)
-        # additionalProperties 若为空 dict，删除；保留显式 True/False
-        if isinstance(prop.get("additionalProperties"), dict) and len(prop["additionalProperties"]) == 0:
+        # If additionalProperties is empty dict, delete it; keep explicit True/False
+        if (
+            isinstance(prop.get("additionalProperties"), dict)
+            and len(prop["additionalProperties"]) == 0
+        ):
             prop.pop("additionalProperties", None)
 
     return prop
@@ -125,11 +148,11 @@ def _ensure_property_schema(name: str, schema: Dict[str, Any]) -> Dict[str, Any]
 def _sanitize_json_schema(schema: Dict[str, Any]) -> Dict[str, Any]:
     s = _deep_clean(schema if isinstance(schema, dict) else {})
 
-    # 如果存在 properties，则顶层应为 object
+    # If properties exist, top level should be object
     if "properties" in s and not isinstance(s.get("type"), str):
         s["type"] = "object"
 
-    # 修正 $schema
+    # Fix $schema
     if "$schema" in s and not isinstance(s["$schema"], str):
         s.pop("$schema", None)
     if "$schema" not in s:
@@ -139,10 +162,12 @@ def _sanitize_json_schema(schema: Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(properties, dict):
         fixed_props: Dict[str, Any] = {}
         for name, subschema in properties.items():
-            fixed_props[name] = _ensure_property_schema(name, subschema if isinstance(subschema, dict) else {})
+            fixed_props[name] = _ensure_property_schema(
+                name, subschema if isinstance(subschema, dict) else {}
+            )
         s["properties"] = fixed_props
 
-    # required：去掉不存在的属性，且不允许为空列表
+    # required: remove non-existent properties, and don't allow empty lists
     if isinstance(s.get("required"), list):
         if isinstance(properties, dict):
             req = [r for r in s["required"] if isinstance(r, str) and r in properties]
@@ -153,8 +178,11 @@ def _sanitize_json_schema(schema: Dict[str, Any]) -> Dict[str, Any]:
         else:
             s.pop("required", None)
 
-    # additionalProperties：空 dict 视为无效，删除
-    if isinstance(s.get("additionalProperties"), dict) and len(s["additionalProperties"]) == 0:
+    # additionalProperties: empty dict is considered invalid, delete it
+    if (
+        isinstance(s.get("additionalProperties"), dict)
+        and len(s["additionalProperties"]) == 0
+    ):
         s.pop("additionalProperties", None)
 
     return s
@@ -164,95 +192,117 @@ class _InputSchemaSanitizerMiddleware:  # deprecated; use sanitize_mcp_input_sch
     pass
 
 
-# ============= 应用创建 =============
+# ============= Application Creation =============
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifecycle management"""
+    # Execute on startup
+    await startup_tasks()
+    yield
+    # Execute on shutdown (if needed)
+    pass
+
 
 def create_app() -> FastAPI:
-    """创建FastAPI应用"""
-    # 将服务器日志重定向到专用文件
+    """Create FastAPI application"""
+    # Redirect server logs to dedicated file
     try:
-        set_log_file('warp_server.log')
+        set_log_file("warp_server.log")
     except Exception:
         pass
-    
-    # 使用protobuf路由的应用作为主应用
-    app = protobuf_app
 
-    # 挂载输入 schema 清理中间件（覆盖 Warp 相关端点）
+    # Use protobuf routing application as main app, and add lifespan handler
+    app = FastAPI(lifespan=lifespan)
 
-    
-    # 检查静态文件目录
+    # Include protobuf routes into main application
+    app.mount("/", protobuf_app)
+
+    # Mount input schema cleaning middleware (override Warp related endpoints)
+
+    # Check static files directory
     static_dir = Path("static")
     if static_dir.exists():
-        # 挂载静态文件服务
+        # Mount static file service
         app.mount("/static", StaticFiles(directory="static"), name="static")
-        logger.info("✅ 静态文件服务已启用: /static")
-        
-        # 添加根路径重定向到前端界面
+        logger.info("✅ Static file service enabled: /static")
+
+        # Add root path redirect to frontend interface
         @app.get("/gui", response_class=HTMLResponse)
         async def serve_gui():
-            """提供前端GUI界面"""
+            """Serve frontend GUI interface"""
             index_file = static_dir / "index.html"
             if index_file.exists():
-                return HTMLResponse(content=index_file.read_text(encoding='utf-8'))
+                return HTMLResponse(content=index_file.read_text(encoding="utf-8"))
             else:
-                return HTMLResponse(content="""
+                return HTMLResponse(
+                    content="""
                 <html>
                     <body>
-                        <h1>前端界面文件未找到</h1>
-                        <p>请确保 static/index.html 文件存在</p>
+                        <h1>Frontend interface file not found</h1>
+                        <p>Please ensure static/index.html file exists</p>
                     </body>
                 </html>
-                """)
+                """
+                )
     else:
-        logger.warning("静态文件目录不存在，GUI界面将不可用")
-        
+        logger.warning("Static files directory does not exist, GUI interface will not be available")
+
         @app.get("/gui", response_class=HTMLResponse)
         async def no_gui():
-            return HTMLResponse(content="""
+            return HTMLResponse(
+                content="""
             <html>
                 <body>
-                    <h1>GUI界面未安装</h1>
-                    <p>静态文件目录 'static' 不存在</p>
-                    <p>请创建前端界面文件</p>
+                    <h1>GUI interface not installed</h1>
+                    <p>Static file directory 'static' does not exist</p>
+                    <p>Please create frontend interface files</p>
                 </body>
             </html>
-            """)
+            """
+            )
 
-    # ============= 新增接口：返回protobuf编码后的AI请求字节 =============
+    # ============= New interface: Return protobuf-encoded AI request bytes =============
     @app.post("/api/warp/encode_raw")
     async def encode_ai_request_raw(
         request: EncodeRequest,
-        output: str = Query("raw", description="输出格式：raw(默认，返回application/x-protobuf字节) 或 base64", regex=r"^(raw|base64)$"),
+        output: str = Query(
+            "raw",
+            description="Output format: raw (default, returns application/x-protobuf bytes) or base64",
+            regex=r"^(raw|base64)$",
+        ),
     ):
         try:
-            # 获取实际数据并验证
+            # Get actual data and validate
             actual_data = request.get_data()
             if not actual_data:
-                raise HTTPException(400, "数据包不能为空")
+                raise HTTPException(400, "Data packet cannot be empty")
 
-            # 在 encode 之前，对 mcp_context.tools[*].input_schema 做一次安全清理
+            # Before encoding, perform safety cleaning on mcp_context.tools[*].input_schema
             if isinstance(actual_data, dict):
                 wrapped = {"json_data": actual_data}
                 wrapped = sanitize_mcp_input_schema_in_packet(wrapped)
                 actual_data = wrapped.get("json_data", actual_data)
 
-            # 将 server_message_data 对象（如有）编码为 Base64URL 字符串
+            # Encode server_message_data object (if any) to Base64URL string
             actual_data = _encode_smd_inplace(actual_data)
 
-            # 编码为protobuf字节
+            # Encode to protobuf bytes
             protobuf_bytes = dict_to_protobuf_bytes(actual_data, request.message_type)
-            logger.info(f"✅ AI请求编码为protobuf成功: {len(protobuf_bytes)} 字节")
+            logger.info(f"✅ AI request encoded to protobuf successfully: {len(protobuf_bytes)} bytes")
 
             if output == "raw":
-                # 直接返回二进制 protobuf 内容
+                # Return binary protobuf content directly
                 return Response(
                     content=protobuf_bytes,
                     media_type="application/x-protobuf",
                     headers={"Content-Length": str(len(protobuf_bytes))},
                 )
             else:
-                # 返回base64文本，便于在JSON中传输/调试
+                # Return base64 text for easy transmission/debugging in JSON
                 import base64
+
                 return {
                     "protobuf_base64": base64.b64encode(protobuf_bytes).decode("utf-8"),
                     "size": len(protobuf_bytes),
@@ -261,10 +311,10 @@ def create_app() -> FastAPI:
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"❌ AI请求编码失败: {e}")
-            raise HTTPException(500, f"编码失败: {str(e)}")
-    
-    # ============= OpenAI 兼容：模型列表接口 =============
+            logger.error(f"❌ AI request encoding failed: {e}")
+            raise HTTPException(500, f"Encoding failed: {str(e)}")
+
+    # ============= OpenAI compatible: Model list interface =============
     @app.get("/v1/models")
     async def list_models():
         """OpenAI-compatible endpoint that lists available models."""
@@ -272,25 +322,22 @@ def create_app() -> FastAPI:
             models = get_all_unique_models()
             return {"object": "list", "data": models}
         except Exception as e:
-            logger.error(f"❌ 获取模型列表失败: {e}")
-            raise HTTPException(500, f"获取模型列表失败: {str(e)}")
-    
+            logger.error(f"❌ Failed to get model list: {e}")
+            raise HTTPException(500, f"Failed to get model list: {str(e)}")
+
     return app
 
 
 ############################################################
-# server_message_data 深度编解码工具
+# server_message_data deep encoding/decoding tools
 ############################################################
 
-# 说明：
-# 根据抓包与分析，server_message_data 是 Base64URL 编码的 proto3 消息：
-#   - 字段 1：string（通常为 36 字节 UUID）
-#   - 字段 3：google.protobuf.Timestamp（字段1=seconds，字段2=nanos）
-# 可能出现：仅 Timestamp、仅 UUID、或 UUID + Timestamp。
+# Description:
+# According to packet capture and analysis, server_message_data is a Base64URL encoded proto3 message:
+#   - Field 1: string (usually 36 byte UUID)
+#   - Field 3: google.protobuf.Timestamp (field 1=seconds, field 2=nanos)
+# May appear as: Timestamp only, UUID only, or UUID + Timestamp.
 
-from typing import Dict, Optional, Tuple
-import base64
-from datetime import datetime, timezone
 try:
     from zoneinfo import ZoneInfo  # Python 3.9+
 except Exception:
@@ -381,7 +428,7 @@ def _encode_timestamp(seconds: Optional[int], nanos: Optional[int]) -> bytes:
 
 
 def decode_server_message_data(b64url: str) -> Dict:
-    """解码 Base64URL 的 server_message_data，返回结构化信息。"""
+    """Decode Base64URL server_message_data, return structured information."""
     try:
         raw = _b64url_decode_padded(b64url)
     except Exception as e:
@@ -399,7 +446,7 @@ def decode_server_message_data(b64url: str) -> Dict:
         if wt == 2:  # length-delimited
             ln, i2 = _read_varint(raw, i)
             i = i2
-            data = raw[i:i+ln]
+            data = raw[i : i + ln]
             i += ln
             if field_no == 1:  # uuid string
                 try:
@@ -427,8 +474,12 @@ def decode_server_message_data(b64url: str) -> Dict:
     return out
 
 
-def encode_server_message_data(uuid: str = None, seconds: int = None, nanos: int = None) -> str:
-    """将 uuid/seconds/nanos 组合编码为 Base64URL 字符串。"""
+def encode_server_message_data(
+    uuid: Optional[str] = None,
+    seconds: Optional[int] = None,
+    nanos: Optional[int] = None,
+) -> str:
+    """Encode uuid/seconds/nanos combination as Base64URL string."""
     parts = bytearray()
     if uuid:
         b = uuid.encode("utf-8")
@@ -446,100 +497,87 @@ def encode_server_message_data(uuid: str = None, seconds: int = None, nanos: int
 
 
 async def startup_tasks():
-    """启动时执行的任务"""
-    logger.info("="*60)
-    logger.info("Warp Protobuf编解码服务器启动")
-    logger.info("="*60)
-    
-    # 检查protobuf运行时
+    """Tasks to execute on startup"""
+    logger.info("=" * 60)
+    logger.info("Warp Protobuf Encoding/Decoding Server Starting")
+    logger.info("=" * 60)
+
+    # Check protobuf runtime
     try:
         from warp2protobuf.core.protobuf import ensure_proto_runtime
+
         ensure_proto_runtime()
-        logger.info("✅ Protobuf运行时初始化成功")
+        logger.info("✅ Protobuf runtime initialized successfully")
     except Exception as e:
-        logger.error(f"❌ Protobuf运行时初始化失败: {e}")
+        logger.error(f"❌ Protobuf runtime initialization failed: {e}")
         raise
-    
-    # 检查JWT token
+
+    # Check JWT token
     try:
         from warp2protobuf.core.auth import get_jwt_token, is_token_expired
+
         token = get_jwt_token()
         if token and not is_token_expired(token):
-            logger.info("✅ JWT token有效")
+            logger.info("✅ JWT token is valid")
         elif not token:
-            logger.warning("⚠️ 未找到JWT token，尝试申请匿名访问token用于额度初始化…")
+            logger.warning("⚠️ JWT token not found, attempting to acquire anonymous access token for quota initialization...")
             try:
                 new_token = await acquire_anonymous_access_token()
                 if new_token:
-                    logger.info("✅ 匿名访问token申请成功")
+                    logger.info("✅ Anonymous access token acquired successfully")
                 else:
-                    logger.warning("⚠️ 匿名访问token申请失败")
+                    logger.warning("⚠️ Anonymous access token acquisition failed")
             except Exception as e2:
-                logger.warning(f"⚠️ 匿名访问token申请异常: {e2}")
+                logger.warning(f"⚠️ Anonymous access token acquisition exception: {e2}")
         else:
-            logger.warning("⚠️ JWT token无效或已过期，建议运行: uv run refresh_jwt.py")
+            logger.warning("⚠️ JWT token invalid or expired, suggest running: uv run refresh_jwt.py")
     except Exception as e:
-        logger.warning(f"⚠️ JWT检查失败: {e}")
-    
-    # 如需 OpenAI 兼容层，请单独运行 src/openai_compat_server.py
-    
-    # 显示可用端点
-    logger.info("-"*40)
-    logger.info("可用的API端点:")
-    logger.info("  GET  /                   - 服务信息")
-    logger.info("  GET  /healthz            - 健康检查")
-    logger.info("  GET  /gui                - Web GUI界面")
-    logger.info("  POST /api/encode         - JSON -> Protobuf编码")
-    logger.info("  POST /api/decode         - Protobuf -> JSON解码")
-    logger.info("  POST /api/stream-decode  - 流式protobuf解码")
-    logger.info("  POST /api/warp/send      - JSON -> Protobuf -> Warp API转发")
-    logger.info("  POST /api/warp/send_stream - JSON -> Protobuf -> Warp API转发(返回解析事件)")
-    logger.info("  POST /api/warp/send_stream_sse - JSON -> Protobuf -> Warp API转发(实时SSE，事件已解析)")
-    logger.info("  POST /api/warp/graphql/* - GraphQL请求转发到Warp API（带鉴权）")
-    logger.info("  GET  /api/schemas        - Protobuf schema信息")
-    logger.info("  GET  /api/auth/status    - JWT认证状态")
-    logger.info("  POST /api/auth/refresh   - 刷新JWT token")
-    logger.info("  GET  /api/auth/user_id   - 获取当前用户ID")
-    logger.info("  GET  /api/packets/history - 数据包历史记录")
-    logger.info("  WS   /ws                 - WebSocket实时监控")
-    logger.info("-"*40)
-    logger.info("测试命令:")
-    logger.info("  uv run main.py --test basic    - 运行基础测试")
-    logger.info("  uv run main.py --list          - 查看所有测试场景")
-    logger.info("="*60)
+        logger.warning(f"⚠️ JWT check failed: {e}")
+
+    # If OpenAI compatibility layer is needed, run src/openai_compat_server.py separately
+
+    # Display available endpoints
+    logger.info("-" * 40)
+    logger.info("Available API endpoints:")
+    logger.info("  GET  /                   - Service information")
+    logger.info("  GET  /healthz            - Health check")
+    logger.info("  GET  /gui                - Web GUI interface")
+    logger.info("  POST /api/encode         - JSON -> Protobuf encoding")
+    logger.info("  POST /api/decode         - Protobuf -> JSON decoding")
+    logger.info("  POST /api/stream-decode  - Stream protobuf decoding")
+    logger.info("  POST /api/warp/send      - JSON -> Protobuf -> Warp API forward")
+    logger.info(
+        "  POST /api/warp/send_stream - JSON -> Protobuf -> Warp API forward (return parsed events)"
+    )
+    logger.info(
+        "  POST /api/warp/send_stream_sse - JSON -> Protobuf -> Warp API forward (real-time SSE, events parsed)"
+    )
+    logger.info("  POST /api/warp/graphql/* - GraphQL request forward to Warp API (with auth)")
+    logger.info("  GET  /api/schemas        - Protobuf schema information")
+    logger.info("  GET  /api/auth/status    - JWT authentication status")
+    logger.info("  POST /api/auth/refresh   - Refresh JWT token")
+    logger.info("  GET  /api/auth/user_id   - Get current user ID")
+    logger.info("  GET  /api/packets/history - Packet history records")
+    logger.info("  WS   /ws                 - WebSocket real-time monitoring")
+    logger.info("-" * 40)
+    logger.info("Test commands:")
+    logger.info("  uv run main.py --test basic    - Run basic tests")
+    logger.info("  uv run main.py --list          - View all test scenarios")
+    logger.info("=" * 60)
 
 
 def main():
-    """主函数"""
-    import argparse
-    
-    # 解析命令行参数
-    parser = argparse.ArgumentParser(description="Warp Protobuf编解码服务器")
-    parser.add_argument("--port", type=int, default=28888, help="服务器监听端口 (默认: 28888)")
-    args = parser.parse_args()
-    
-    # 创建应用
+    """Main function"""
+    # Create application
     app = create_app()
-    
-    # 添加启动事件
-    @app.on_event("startup")
-    async def startup_event():
-        await startup_tasks()
-    
-    # 启动服务器
+
+    # Start server
     try:
-        logger.info(f"启动服务器在端口 {args.port}")
-        uvicorn.run(
-            app,
-            host="0.0.0.0",
-            port=args.port,
-            log_level="info",
-            access_log=True
-        )
+        uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info", access_log=True)
     except KeyboardInterrupt:
-        logger.info("服务器被用户停止")
+        logger.info("Server stopped by user")
     except Exception as e:
-        logger.error(f"服务器启动失败: {e}")
+        logger.error(f"Server startup failed: {e}")
         raise
 
 

@@ -18,6 +18,54 @@ from dotenv import load_dotenv, set_key
 from ..config.settings import REFRESH_TOKEN_B64, REFRESH_URL, CLIENT_VERSION, OS_CATEGORY, OS_NAME, OS_VERSION
 from .logging import logger, log
 
+def get_default_proxy():
+    """Get default proxy from environment variables or construct from components."""
+    proxy = os.getenv("HTTP_PROXY")
+    if proxy:
+        return proxy
+    
+    # Try to construct from individual components
+    user = os.getenv("PROXY_USER")
+    password = os.getenv("PROXY_PASS")
+    host = os.getenv("PROXY_HOST")
+    port = os.getenv("PROXY_PORT")
+    
+    if all([user, password, host, port]):
+        return f"http://{user}:{password}@{host}:{port}"
+    
+    return None
+
+
+def get_proxy_config(url: str = "") -> dict:
+    """Get proxy configuration for HTTP requests.
+    
+    Args:
+        url: The target URL to check if proxy should be used
+    
+    Returns client kwargs dict with proxy configuration if available.
+    """
+    client_kwargs = {"timeout": httpx.Timeout(30.0)}
+    
+    # Never use proxy for localhost connections
+    if any(x in url.lower() for x in ['localhost', '127.0.0.1', '0.0.0.0']):
+        logger.debug(f"Skipping proxy for localhost URL: {url}")
+        return client_kwargs
+    
+    # Prefer environment variable HTTP_PROXY if set, otherwise use constructed proxy
+    proxy = os.getenv("HTTP_PROXY") or get_default_proxy()
+    
+    if proxy and proxy.strip():
+        client_kwargs["proxy"] = proxy
+        # Mask credentials in log output
+        if '@' in proxy:
+            proxy_parts = proxy.split('@')
+            proxy_display = f"[CREDENTIALS]@{proxy_parts[-1]}"
+        else:
+            proxy_display = proxy
+        logger.info(f"Using proxy for HTTP requests: {proxy_display}")
+    
+    return client_kwargs
+
 
 def decode_jwt_payload(token: str) -> dict:
     """Decode JWT payload to check expiration"""
@@ -70,8 +118,12 @@ async def refresh_jwt_token() -> dict:
         "accept-encoding": "gzip, br",
         "content-length": str(len(payload))
     }
+    
+    # Get proxy configuration (skip proxy for refresh URL if it's localhost)
+    client_kwargs = get_proxy_config(REFRESH_URL)
+    
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(**client_kwargs) as client:
             response = await client.post(
                 REFRESH_URL,
                 headers=headers,
@@ -248,7 +300,11 @@ async def _create_anonymous_user() -> dict:
         }
     }
     body = {"query": query, "variables": variables, "operationName": "CreateAnonymousUser"}
-    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+    
+    # Get proxy configuration for GraphQL URL
+    client_kwargs = get_proxy_config(_ANON_GQL_URL)
+    
+    async with httpx.AsyncClient(**client_kwargs) as client:
         resp = await client.post(_ANON_GQL_URL, headers=headers, json=body)
         if resp.status_code != 200:
             raise RuntimeError(f"CreateAnonymousUser failed: HTTP {resp.status_code} {resp.text[:200]}")
@@ -271,7 +327,11 @@ async def _exchange_id_token_for_refresh_token(id_token: str) -> dict:
         "returnSecureToken": "true",
         "token": id_token,
     }
-    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+    
+    # Get proxy configuration for Identity Toolkit URL
+    client_kwargs = get_proxy_config(url)
+    
+    async with httpx.AsyncClient(**client_kwargs) as client:
         resp = await client.post(url, headers=headers, data=form)
         if resp.status_code != 200:
             raise RuntimeError(f"signInWithCustomToken failed: HTTP {resp.status_code} {resp.text[:200]}")
@@ -313,7 +373,11 @@ async def acquire_anonymous_access_token() -> str:
         "accept-encoding": "gzip, br",
         "content-length": str(len(payload))
     }
-    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+    
+    # Get proxy configuration for refresh URL
+    client_kwargs = get_proxy_config(REFRESH_URL)
+    
+    async with httpx.AsyncClient(**client_kwargs) as client:
         resp = await client.post(REFRESH_URL, headers=headers, content=payload)
         if resp.status_code != 200:
             raise RuntimeError(f"Acquire access_token failed: HTTP {resp.status_code} {resp.text[:200]}")

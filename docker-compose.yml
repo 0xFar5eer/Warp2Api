@@ -1,32 +1,50 @@
-version: '3.8'
+version: "3.8"
 
 services:
-  warp2api:
+  warp2api_proxy:
     build: .
-    container_name: warp2api
+    image: warp2api_proxy:latest
+    container_name: warp2api_proxy
     ports:
-      - "3009:8000"  # Protobuf 编解码服务器端口
-      - "3010:8010"  # OpenAI 兼容 API 服务器端口
+      - "4009:8000" # Protobuf encoding/decoding server port
+      - "4010:8010" # OpenAI compatible API server port
+    env_file:
+      - .env
     environment:
       - HOST=0.0.0.0
-      - PORT=8010
-      - WARP_BRIDGE_URL=http://127.0.0.1:8000
-      - WARP_LOG_LEVEL=info
-      - WARP_ACCESS_LOG=true
-      - OPENAI_LOG_LEVEL=info
-      - OPENAI_ACCESS_LOG=true
-      # - HTTP_PROXY=
-      # - HTTPS_PROXY=
-      - NO_PROXY=127.0.0.1,localhost
-      # 可选：如果有自己的 Warp 凭证，可以取消注释并填写
-      # - WARP_JWT=your_jwt_token_here
-      # - WARP_REFRESH_TOKEN=your_refresh_token_here
+      - PORT=${PORT:-8010}
+      - WARP_BRIDGE_URL=${WARP_BRIDGE_URL:-http://localhost:8000}
+      - WARP_LOG_LEVEL=${WARP_LOG_LEVEL:-info}
+      - WARP_ACCESS_LOG=${WARP_ACCESS_LOG:-true}
+      - OPENAI_LOG_LEVEL=${OPENAI_LOG_LEVEL:-info}
+      - OPENAI_ACCESS_LOG=${OPENAI_ACCESS_LOG:-true}
+      # Construct HTTP_PROXY from individual credentials if not directly set
+      - HTTP_PROXY=${HTTP_PROXY:-http://${PROXY_USER}:${PROXY_PASS}@${PROXY_HOST}:${PROXY_PORT}}
+      # Ensure localhost connections never use proxy
+      - NO_PROXY=localhost,127.0.0.1,0.0.0.0,host.docker.internal,::1
+      # Optional: JWT tokens from .env file
+      - WARP_JWT=${WARP_JWT:-}
+      - WARP_REFRESH_TOKEN=${WARP_REFRESH_TOKEN:-}
+      # Pass through proxy credentials
+      - PROXY_USER=${PROXY_USER:-}
+      - PROXY_PASS=${PROXY_PASS:-}
+      - PROXY_HOST=${PROXY_HOST:-}
+      - PROXY_PORT=${PROXY_PORT:-}
     volumes:
-      # 可选：挂载日志目录
+      # Optional: Mount logs directory
       - ./logs:/app/logs
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8010/healthz", "||", "exit", "1"]
+      test:
+        [
+          "CMD",
+          "curl",
+          "-f",
+          "http://localhost:8010/healthz",
+          "||",
+          "exit",
+          "1",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3

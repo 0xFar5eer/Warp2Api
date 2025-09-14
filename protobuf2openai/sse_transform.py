@@ -20,15 +20,16 @@ async def stream_openai_sse(packet: Dict[str, Any], completion_id: str, created_
             "model": model_id,
             "choices": [{"index": 0, "delta": {"role": "assistant"}}],
         }
-        # 打印转换后的首个 SSE 事件（OpenAI 格式）
+        # Print first converted SSE event (OpenAI format)
         try:
-            logger.info("[OpenAI Compat] 转换后的 SSE(emit): %s", json.dumps(first, ensure_ascii=False))
+            logger.info("[OpenAI Compat] Converted SSE(emit): %s", json.dumps(first, ensure_ascii=False))
         except Exception:
             pass
         yield f"data: {json.dumps(first, ensure_ascii=False)}\n\n"
 
         timeout = httpx.Timeout(60.0)
-        async with httpx.AsyncClient(http2=True, timeout=timeout, trust_env=True) as client:
+        # Don't use proxy for localhost connections
+        async with httpx.AsyncClient(http2=True, timeout=timeout, trust_env=False) as client:
             def _do_stream():
                 return client.stream(
                     "POST",
@@ -37,7 +38,7 @@ async def stream_openai_sse(packet: Dict[str, Any], completion_id: str, created_
                     json={"json_data": packet, "message_type": "warp.multi_agent.v1.Request"},
                 )
 
-            # 首次请求
+            # First request
             response_cm = _do_stream()
             async with response_cm as response:
                 if response.status_code == 429:
@@ -46,7 +47,7 @@ async def stream_openai_sse(packet: Dict[str, Any], completion_id: str, created_
                         logger.warning("[OpenAI Compat] Bridge returned 429. Tried JWT refresh -> HTTP %s", r.status_code)
                     except Exception as _e:
                         logger.warning("[OpenAI Compat] JWT refresh attempt failed after 429: %s", _e)
-                    # 重试一次
+                    # Retry once
                     response_cm2 = _do_stream()
                     async with response_cm2 as response2:
                         response = response2
@@ -62,9 +63,9 @@ async def stream_openai_sse(packet: Dict[str, Any], completion_id: str, created_
                                 payload = line[5:].strip()
                                 if not payload:
                                     continue
-                                # 打印接收到的 Protobuf SSE 原始事件片段
+                                # Print received Protobuf SSE raw event fragment
                                 try:
-                                    logger.info("[OpenAI Compat] 接收到的 Protobuf SSE(data): %s", payload)
+                                    logger.info("[OpenAI Compat] Received Protobuf SSE(data): %s", payload)
                                 except Exception:
                                     pass
                                 if payload == "[DONE]":
@@ -80,9 +81,9 @@ async def stream_openai_sse(packet: Dict[str, Any], completion_id: str, created_
                                 current = ""
                                 event_data = (ev or {}).get("parsed_data") or {}
 
-                                # 打印接收到的 Protobuf 事件（解析后）
+                                # Print received Protobuf event (parsed)
                                 try:
-                                    logger.info("[OpenAI Compat] 接收到的 Protobuf 事件(parsed): %s", json.dumps(event_data, ensure_ascii=False))
+                                    logger.info("[OpenAI Compat] Received Protobuf event(parsed): %s", json.dumps(event_data, ensure_ascii=False))
                                 except Exception:
                                     pass
 
@@ -106,9 +107,9 @@ async def stream_openai_sse(packet: Dict[str, Any], completion_id: str, created_
                                                     "model": model_id,
                                                     "choices": [{"index": 0, "delta": {"content": text_content}}],
                                                 }
-                                                # 打印转换后的 OpenAI SSE 事件
+                                                # Print converted OpenAI SSE event
                                                 try:
-                                                    logger.info("[OpenAI Compat] 转换后的 SSE(emit): %s", json.dumps(delta, ensure_ascii=False))
+                                                    logger.info("[OpenAI Compat] Converted SSE(emit): %s", json.dumps(delta, ensure_ascii=False))
                                                 except Exception:
                                                     pass
                                                 yield f"data: {json.dumps(delta, ensure_ascii=False)}\n\n"
@@ -143,9 +144,9 @@ async def stream_openai_sse(packet: Dict[str, Any], completion_id: str, created_
                                                             }
                                                         }],
                                                     }
-                                                    # 打印转换后的 OpenAI 工具调用事件
+                                                    # Print converted OpenAI tool call event
                                                     try:
-                                                        logger.info("[OpenAI Compat] 转换后的 SSE(emit tool_calls): %s", json.dumps(delta, ensure_ascii=False))
+                                                        logger.info("[OpenAI Compat] Converted SSE(emit tool_calls): %s", json.dumps(delta, ensure_ascii=False))
                                                     except Exception:
                                                         pass
                                                     yield f"data: {json.dumps(delta, ensure_ascii=False)}\n\n"
@@ -162,7 +163,7 @@ async def stream_openai_sse(packet: Dict[str, Any], completion_id: str, created_
                                                             "choices": [{"index": 0, "delta": {"content": text_content}}],
                                                         }
                                                         try:
-                                                            logger.info("[OpenAI Compat] 转换后的 SSE(emit): %s", json.dumps(delta, ensure_ascii=False))
+                                                            logger.info("[OpenAI Compat] Converted SSE(emit): %s", json.dumps(delta, ensure_ascii=False))
                                                         except Exception:
                                                             pass
                                                         yield f"data: {json.dumps(delta, ensure_ascii=False)}\n\n"
@@ -176,14 +177,14 @@ async def stream_openai_sse(packet: Dict[str, Any], completion_id: str, created_
                                         "choices": [{"index": 0, "delta": {}, "finish_reason": ("tool_calls" if tool_calls_emitted else "stop")}],
                                     }
                                     try:
-                                        logger.info("[OpenAI Compat] 转换后的 SSE(emit done): %s", json.dumps(done_chunk, ensure_ascii=False))
+                                        logger.info("[OpenAI Compat] Converted SSE(emit done): %s", json.dumps(done_chunk, ensure_ascii=False))
                                     except Exception:
                                         pass
                                     yield f"data: {json.dumps(done_chunk, ensure_ascii=False)}\n\n"
 
-                        # 打印完成标记
+                        # Print completion marker
                         try:
-                            logger.info("[OpenAI Compat] 转换后的 SSE(emit): [DONE]")
+                            logger.info("[OpenAI Compat] Converted SSE(emit): [DONE]")
                         except Exception:
                             pass
                         yield "data: [DONE]\n\n"
@@ -202,9 +203,9 @@ async def stream_openai_sse(packet: Dict[str, Any], completion_id: str, created_
                         payload = line[5:].strip()
                         if not payload:
                             continue
-                        # 打印接收到的 Protobuf SSE 原始事件片段
+                        # Print received Protobuf SSE raw event fragment
                         try:
-                            logger.info("[OpenAI Compat] 接收到的 Protobuf SSE(data): %s", payload)
+                            logger.info("[OpenAI Compat] Received Protobuf SSE(data): %s", payload)
                         except Exception:
                             pass
                         if payload == "[DONE]":
@@ -220,9 +221,9 @@ async def stream_openai_sse(packet: Dict[str, Any], completion_id: str, created_
                         current = ""
                         event_data = (ev or {}).get("parsed_data") or {}
 
-                        # 打印接收到的 Protobuf 事件（解析后）
+                        # Print received Protobuf event (parsed)
                         try:
-                            logger.info("[OpenAI Compat] 接收到的 Protobuf 事件(parsed): %s", json.dumps(event_data, ensure_ascii=False))
+                            logger.info("[OpenAI Compat] Received Protobuf event(parsed): %s", json.dumps(event_data, ensure_ascii=False))
                         except Exception:
                             pass
 
@@ -246,9 +247,9 @@ async def stream_openai_sse(packet: Dict[str, Any], completion_id: str, created_
                                             "model": model_id,
                                             "choices": [{"index": 0, "delta": {"content": text_content}}],
                                         }
-                                        # 打印转换后的 OpenAI SSE 事件
+                                        # Print converted OpenAI SSE event
                                         try:
-                                            logger.info("[OpenAI Compat] 转换后的 SSE(emit): %s", json.dumps(delta, ensure_ascii=False))
+                                            logger.info("[OpenAI Compat] Converted SSE(emit): %s", json.dumps(delta, ensure_ascii=False))
                                         except Exception:
                                             pass
                                         yield f"data: {json.dumps(delta, ensure_ascii=False)}\n\n"
@@ -283,9 +284,9 @@ async def stream_openai_sse(packet: Dict[str, Any], completion_id: str, created_
                                                     }
                                                 }],
                                             }
-                                            # 打印转换后的 OpenAI 工具调用事件
+                                            # Print converted OpenAI tool call event
                                             try:
-                                                logger.info("[OpenAI Compat] 转换后的 SSE(emit tool_calls): %s", json.dumps(delta, ensure_ascii=False))
+                                                logger.info("[OpenAI Compat] Converted SSE(emit tool_calls): %s", json.dumps(delta, ensure_ascii=False))
                                             except Exception:
                                                 pass
                                             yield f"data: {json.dumps(delta, ensure_ascii=False)}\n\n"
@@ -302,7 +303,7 @@ async def stream_openai_sse(packet: Dict[str, Any], completion_id: str, created_
                                                     "choices": [{"index": 0, "delta": {"content": text_content}}],
                                                 }
                                                 try:
-                                                    logger.info("[OpenAI Compat] 转换后的 SSE(emit): %s", json.dumps(delta, ensure_ascii=False))
+                                                    logger.info("[OpenAI Compat] Converted SSE(emit): %s", json.dumps(delta, ensure_ascii=False))
                                                 except Exception:
                                                     pass
                                                 yield f"data: {json.dumps(delta, ensure_ascii=False)}\n\n"
@@ -316,14 +317,14 @@ async def stream_openai_sse(packet: Dict[str, Any], completion_id: str, created_
                                 "choices": [{"index": 0, "delta": {}, "finish_reason": ("tool_calls" if tool_calls_emitted else "stop")}],
                             }
                             try:
-                                logger.info("[OpenAI Compat] 转换后的 SSE(emit done): %s", json.dumps(done_chunk, ensure_ascii=False))
+                                logger.info("[OpenAI Compat] Converted SSE(emit done): %s", json.dumps(done_chunk, ensure_ascii=False))
                             except Exception:
                                 pass
                             yield f"data: {json.dumps(done_chunk, ensure_ascii=False)}\n\n"
 
-                # 打印完成标记
+                # Print completion marker
                 try:
-                    logger.info("[OpenAI Compat] 转换后的 SSE(emit): [DONE]")
+                    logger.info("[OpenAI Compat] Converted SSE(emit): [DONE]")
                 except Exception:
                     pass
                 yield "data: [DONE]\n\n"
@@ -338,7 +339,7 @@ async def stream_openai_sse(packet: Dict[str, Any], completion_id: str, created_
             "error": {"message": str(e)},
         }
         try:
-            logger.info("[OpenAI Compat] 转换后的 SSE(emit error): %s", json.dumps(error_chunk, ensure_ascii=False))
+            logger.info("[OpenAI Compat] Converted SSE(emit error): %s", json.dumps(error_chunk, ensure_ascii=False))
         except Exception:
             pass
         yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"

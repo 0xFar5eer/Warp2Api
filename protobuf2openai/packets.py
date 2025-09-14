@@ -105,7 +105,7 @@ def map_history_to_warp_messages(history: List[ChatMessage], task_id: str, syste
 def attach_user_and_tools_to_inputs(packet: Dict[str, Any], history: List[ChatMessage], system_prompt_text: Optional[str]) -> None:
     # Use the final post-reorder message as input (user or tool result)
     if not history:
-        assert False, "post-reorder 必须至少包含一条消息"
+        assert False, "post-reorder must contain at least one message"
     last = history[-1]
     if last.role == "user":
         user_query_payload: Dict[str, Any] = {"query": segments_to_text(normalize_content_to_list(last.content))}
@@ -134,4 +134,4 @@ def attach_user_and_tools_to_inputs(packet: Dict[str, Any], history: List[ChatMe
         })
         return
     # If neither, assert to catch protocol violations
-    assert False, "post-reorder 最后一条必须是 user 或 tool 结果" 
+    assert False, "post-reorder last message must be user or tool result"

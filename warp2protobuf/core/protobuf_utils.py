@@ -19,7 +19,7 @@ from .server_message_data import decode_server_message_data, encode_server_messa
 
 
 def protobuf_to_dict(protobuf_bytes: bytes, message_type: str) -> Dict:
-    """将protobuf字节转换为字典"""
+    """Convert protobuf bytes to dictionary"""
     ensure_proto_runtime()
     
     try:
@@ -29,27 +29,27 @@ def protobuf_to_dict(protobuf_bytes: bytes, message_type: str) -> Dict:
         
         data = MessageToDict(message, preserving_proto_field_name=True)
         
-        # 在转换阶段自动解析 server_message_data（Base64URL -> 结构化对象）
+        # Automatically parse server_message_data during conversion (Base64URL -> structured object)
         data = _decode_smd_inplace(data)
         return data
     
     except Exception as e:
-        logger.error(f"Protobuf解码失败: {e}")
-        raise HTTPException(500, f"Protobuf解码失败: {e}")
+        logger.error(f"Protobuf decoding failed: {e}")
+        raise HTTPException(500, f"Protobuf decoding failed: {e}")
 
 
 
 
 
 def dict_to_protobuf_bytes(data_dict: Dict, message_type: str = "warp.multi_agent.v1.Request") -> bytes:
-    """字典转protobuf字节的包装函数"""
+    """Dictionary to protobuf bytes wrapper function"""
     ensure_proto_runtime()
     
     try:
         MessageClass = msg_cls(message_type)
         message = MessageClass()
         
-        # 在转换阶段自动处理 server_message_data（对象 -> Base64URL 字符串）
+        # Automatically handle server_message_data during conversion (object -> Base64URL string)
         safe_dict = _encode_smd_inplace(data_dict)
         
         _populate_protobuf_from_dict(message, safe_dict, path="$")
@@ -57,14 +57,14 @@ def dict_to_protobuf_bytes(data_dict: Dict, message_type: str = "warp.multi_agen
         return message.SerializeToString()
     
     except Exception as e:
-        logger.error(f"Protobuf编码失败: {e}")
-        raise HTTPException(500, f"Protobuf编码失败: {e}")
+        logger.error(f"Protobuf encoding failed: {e}")
+        raise HTTPException(500, f"Protobuf encoding failed: {e}")
 
 
 
 
 def _fill_google_value_dynamic(value_msg: Any, py_value: Any) -> None:
-    """在动态 google.protobuf.Value 消息上填充 Python 值（不创建 struct_pb2.Value 实例）。"""
+    """Fill Python value on dynamic google.protobuf.Value message (without creating struct_pb2.Value instance)."""
     try:
         if py_value is None:
             setattr(value_msg, "null_value", 0)
@@ -91,20 +91,20 @@ def _fill_google_value_dynamic(value_msg: Any, py_value: Any) -> None:
             return
         setattr(value_msg, "string_value", str(py_value))
     except Exception as e:
-        logger.warning(f"填充 google.protobuf.Value 失败: {e}")
+        logger.warning(f"Failed to fill google.protobuf.Value: {e}")
 
 
 
 
 def _fill_google_struct_dynamic(struct_msg: Any, py_dict: Dict[str, Any]) -> None:
-    """在动态 google.protobuf.Struct 上填充 Python dict（不使用 struct_pb2.Struct.update）。"""
+    """Fill Python dict on dynamic google.protobuf.Struct (without using struct_pb2.Struct.update)."""
     try:
         fields_map = getattr(struct_msg, "fields")
         for k, v in py_dict.items():
             sub_val = fields_map[k]
             _fill_google_value_dynamic(sub_val, v)
     except Exception as e:
-        logger.warning(f"填充 google.protobuf.Struct 失败: {e}")
+        logger.warning(f"Failed to fill google.protobuf.Struct: {e}")
 
 
 
@@ -139,7 +139,7 @@ def _populate_protobuf_from_dict(proto_msg, data_dict: Dict, path: str = "$"):
     for key, value in data_dict.items():
         current_path = f"{path}.{key}"
         if not hasattr(proto_msg, key):
-            logger.warning(f"忽略未知字段: {current_path}")
+            logger.warning(f"Ignoring unknown field: {current_path}")
             continue
             
         field = getattr(proto_msg, key)
@@ -159,13 +159,13 @@ def _populate_protobuf_from_dict(proto_msg, data_dict: Dict, path: str = "$"):
                 _fill_google_struct_dynamic(field, value)
                 continue
         except Exception as e:
-            logger.warning(f"处理 Struct 字段 {current_path} 失败: {e}")
+            logger.warning(f"Failed to process Struct field {current_path}: {e}")
 
         if isinstance(field, struct_pb2.Struct) and isinstance(value, dict):
             try:
                 field.update(value)
             except Exception as e:
-                logger.warning(f"填充Struct失败: {current_path}: {e}")
+                logger.warning(f"Failed to fill Struct: {current_path}: {e}")
             continue
 
         try:
@@ -188,25 +188,25 @@ def _populate_protobuf_from_dict(proto_msg, data_dict: Dict, path: str = "$"):
                                     _populate_protobuf_from_dict(sub_msg, mv, path=f"{current_path}.{mk}")
                                 else:
                                     try:
-                                        logger.warning(f"map值类型不匹配，期望message: {current_path}.{mk}")
+                                        logger.warning(f"Map value type mismatch, expected message: {current_path}.{mk}")
                                     except Exception:
                                         pass
                         else:
                             field[mk] = mv
                     except Exception as me:
-                        logger.warning(f"设置 map 字段 {current_path}.{mk} 失败: {me}")
+                        logger.warning(f"Failed to set map field {current_path}.{mk}: {me}")
                 continue
         except Exception as e:
-            logger.warning(f"处理 map 字段 {current_path} 失败: {e}")
+            logger.warning(f"Failed to process map field {current_path}: {e}")
         
         if isinstance(value, dict):
             try:
                 _populate_protobuf_from_dict(field, value, path=current_path)
             except Exception as e:
-                logger.error(f"填充子消息失败: {current_path}: {e}")
+                logger.error(f"Failed to fill sub-message: {current_path}: {e}")
                 raise
         elif isinstance(value, list):
-            # 处理 repeated enum：允许传入字符串名称或数字
+            # Process repeated enum: allow string names or numbers
             try:
                 if fd is not None and fd.type == _FD.TYPE_ENUM:
                     enum_desc = getattr(fd, "enum_type", None)
@@ -220,34 +220,34 @@ def _populate_protobuf_from_dict(proto_msg, data_dict: Dict, path: str = "$"):
                                 try:
                                     resolved_values.append(int(item))
                                 except Exception:
-                                    logger.warning(f"无法解析枚举值 '{item}' 为 {current_path}，已忽略")
+                                    logger.warning(f"Cannot parse enum value '{item}' for {current_path}, ignored")
                         else:
                             try:
                                 resolved_values.append(int(item))
                             except Exception:
-                                logger.warning(f"无法转换枚举值 {item} 为整数: {current_path}")
+                                logger.warning(f"Cannot convert enum value {item} to integer: {current_path}")
                     field.extend(resolved_values)
                     continue
             except Exception as e:
-                logger.warning(f"处理 repeated enum 字段 {current_path} 失败: {e}")
+                logger.warning(f"Failed to process repeated enum field {current_path}: {e}")
             if value and isinstance(value[0], dict):
                 try:
                     for idx, item in enumerate(value):
                         new_item = field.add()  # type: ignore[attr-defined]
                         _populate_protobuf_from_dict(new_item, item, path=f"{current_path}[{idx}]")
                 except Exception as e:
-                    logger.warning(f"填充复合数组失败 {current_path}: {e}")
+                    logger.warning(f"Failed to fill composite array {current_path}: {e}")
             else:
                 try:
                     field.extend(value)
                 except Exception as e:
-                    logger.warning(f"设置数组字段 {current_path} 失败: {e}")
+                    logger.warning(f"Failed to set array field {current_path}: {e}")
         else:
             if key in ["in_progress", "resume_conversation"]:
                 field.SetInParent()
             else:
                 try:
-                    # 处理标量 enum：允许传入字符串名称或数字
+                    # Process scalar enum: allow string names or numbers
                     if fd is not None and fd.type == _FD.TYPE_ENUM:
                         enum_desc = getattr(fd, "enum_type", None)
                         if isinstance(value, str):
@@ -260,13 +260,13 @@ def _populate_protobuf_from_dict(proto_msg, data_dict: Dict, path: str = "$"):
                                 continue
                             except Exception:
                                 pass
-                        # 其余情况直接赋值，若类型不匹配由底层抛错
+                        # For other cases, directly assign; let the underlying system throw errors for type mismatches
                     setattr(proto_msg, key, value)
                 except Exception as e:
-                    logger.warning(f"设置字段 {current_path} 失败: {e}")
+                    logger.warning(f"Failed to set field {current_path}: {e}")
 
 
-# ===== server_message_data 递归处理 =====
+# ===== server_message_data recursive processing =====
 
 def _encode_smd_inplace(obj: Any) -> Any:
     if isinstance(obj, dict):

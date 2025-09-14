@@ -30,7 +30,8 @@ async def _on_startup():
     delay_s = WARMUP_INIT_DELAY_S
     for attempt in range(1, retries + 1):
         try:
-            async with httpx.AsyncClient(timeout=5.0, trust_env=True) as client:
+            # Don't use proxy for localhost connections
+            async with httpx.AsyncClient(timeout=5.0, trust_env=False) as client:
                 resp = await client.get(url)
             if resp.status_code == 200:
                 logger.info("[OpenAI Compat] Bridge server is ready at %s", url)

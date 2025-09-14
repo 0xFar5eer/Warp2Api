@@ -1,180 +1,133 @@
 # Warp2Api
 
-基于 Python 的桥接服务，为 Warp AI 服务提供 OpenAI Chat Completions API 兼容性，通过利用 Warp 的 protobuf 基础架构，实现与 OpenAI 兼容应用程序的无缝集成。
+A Python-based bridge service that provides OpenAI Chat Completions API compatibility for Warp AI services, enabling seamless integration with OpenAI-compatible applications by leveraging Warp's protobuf infrastructure.
 
-## 🚀 特性
+## 🐳 Docker Compose Quick Start (Recommended)
 
-- **OpenAI API 兼容性**: 完全支持 OpenAI Chat Completions API 格式
-- **Warp 集成**: 使用 protobuf 通信与 Warp AI 服务无缝桥接
-- **双服务器架构**: 
-  - 用于 Warp 通信的 Protobuf 编解码服务器
-  - 用于客户端应用程序的 OpenAI 兼容 API 服务器
-- **JWT 认证**: Warp 服务的自动令牌管理和刷新
-- **流式支持**: 与 OpenAI SSE 格式兼容的实时流式响应
-- **WebSocket 监控**: 内置监控和调试功能
-- **消息重排序**: 针对 Anthropic 风格对话的智能消息处理
+The easiest way to run Warp2Api is using Docker Compose:
 
-## 📋 系统要求
+### 1. **Configure Environment Variables**
 
-- Python 3.9+ (推荐 3.13+)
-- Warp AI 服务访问权限（JWT 令牌会自动获取）
-- 支持 Linux、macOS 和 Windows
+Copy the example environment file and configure your settings:
+```bash
+cp .env.example .env
+```
 
-## 🛠️ 安装
+Edit the `.env` file and configure your proxy settings if you're using a rotating IP proxy service:
+- The proxy credentials are used internally by the Docker container
+- These settings enable IP rotation for each request
+- Your proxy configuration remains private and is never exposed
 
-1. **克隆仓库:**
+### 2. **Start the Service**
+
+```bash
+docker compose up -d
+```
+
+This will start both servers:
+- Protobuf Bridge Server: `http://localhost:4009`
+- OpenAI Compatible API: `http://localhost:4010/v1`
+
+### 3. **Configure Your Client (VSCode Kilocode Extension Example)**
+
+In VSCode with the Kilocode extension:
+1. Go to extension settings
+2. Choose "OpenAI Compatible" mode
+3. Configure:
+   - **Base URL**: `http://localhost:4010/v1`
+   - **API Key**: `dummy` (any value works - not validated)
+   - **Model**: Choose `claude-4.1-opus` or any available model
+
+### 4. **Verify the Service**
+
+Check if the service is running:
+```bash
+curl http://localhost:4010/healthz
+```
+
+Stop the service:
+```bash
+docker compose down
+```
+
+---
+
+## 🚀 Features
+
+- **OpenAI API Compatibility**: Full support for OpenAI Chat Completions API format
+- **Warp Integration**: Seamless bridging with Warp AI services using protobuf communication
+- **Dual Server Architecture**:
+  - Protobuf encoding/decoding server for Warp communication
+  - OpenAI-compatible API server for client applications
+- **JWT Authentication**: Automatic token management and refresh for Warp services
+- **Streaming Support**: Real-time streaming responses compatible with OpenAI SSE format
+- **WebSocket Monitoring**: Built-in monitoring and debugging capabilities
+- **Message Reordering**: Intelligent message handling for Anthropic-style conversations
+
+## 📋 System Requirements
+
+- Python 3.13+
+- Access to Warp AI services (JWT token required)
+
+## 🛠️ Installation
+
+1. **Clone the repository:**
    ```bash
    git clone <repository-url>
    cd Warp2Api
    ```
 
-2. **使用 uv 安装依赖 (推荐):**
+2. **Install dependencies using uv (recommended):**
    ```bash
    uv sync
    ```
 
-   或使用 pip:
+   Or using pip:
    ```bash
    pip install -e .
    ```
 
-3. **配置环境变量:**
-    程序会自动获取匿名JWT TOKEN，您无需手动配置。
+3. **Configure anonymous JWT TOKEN:**
+   You can skip this step - the program will automatically request an anonymous JWT TOKEN
 
-    如需自定义配置，可以创建 `.env` 文件:
-    ```env
-    # Warp2Api 配置
-    # 设置为 true 启用详细日志输出，默认 false（静默模式）
-    W2A_VERBOSE=false
+   Alternatively, you can create a `.env` file with your Warp credentials to use your own subscription quota, though this is not recommended:
+   ```env
+   WARP_JWT=your_jwt_token_here
+   WARP_REFRESH_TOKEN=your_refresh_token_here
+   ```
 
-    # Bridge服务器URL配置 - 修复端口配置问题
-    WARP_BRIDGE_URL=http://127.0.0.1:28888
+## 🎯 Usage
 
-    # 禁用代理以避免连接问题
-    HTTP_PROXY=
-    HTTPS_PROXY=
-    NO_PROXY=127.0.0.1,localhost
+### Quick Start
 
-    # 可选：使用自己的Warp凭证（不推荐，会消耗订阅额度）
-    WARP_JWT=your_jwt_token_here
-    WARP_REFRESH_TOKEN=your_refresh_token_here
-    ```
-
-## 🎯 使用方法
-
-### 快速开始
-
-#### 方法一：一键启动脚本（推荐）
-
-**Linux/macOS:**
-```bash
-# 启动所有服务器
-./start.sh
-
-# 停止所有服务器
-./stop.sh
-
-# 查看服务器状态
-./stop.sh status
-```
-
-**Windows:**
-```batch
-REM 使用批处理脚本
-start.bat          # 启动服务器
-stop.bat           # 停止服务器
-stop.bat status    # 查看服务器状态
-test.bat           # 测试API接口功能
-
-REM 或使用 PowerShell 脚本
-.\start.ps1        # 启动服务器
-.\start.ps1 -Stop  # 停止服务器
-.\start.ps1 -Verbose  # 启用详细日志
-
-REM 测试脚本
-test.bat           # 测试API接口功能（静默模式）
-test.bat -v        # 测试API接口功能（详细模式）
-```
-
-启动脚本会自动：
-- ✅ 检查Python环境和依赖
-- ✅ 自动配置环境变量（包括API_TOKEN自动设置为"0000"）
-- ✅ 按正确顺序启动两个服务器
-- ✅ 验证服务器健康状态（循环检查healthz端点）
-- ✅ 显示关键配置信息
-- ✅ 显示完整的 API 接口 Token
-- ✅ 显示 Roocode / KiloCode baseUrl
-- ✅ 实时监控服务器日志（verbose模式）
-- ✅ 提供详细的错误处理和状态反馈
-
-### 📸 运行演示
-
-#### 项目启动界面
-![项目启动界面](docs/screenshots/运行截图.png)
-
-#### 使用示例
-![使用示例](docs/screenshots/使用截图.png)
-
-#### 方法二：手动启动
-
-1. **启动 Protobuf 桥接服务器:**
+1. **Start the Protobuf Bridge Server:**
    ```bash
    python server.py
    ```
-   默认地址: `http://localhost:28888`
+   Default address: `http://localhost:8000`
 
-2. **启动 OpenAI 兼容 API 服务器:**
+2. **Start the OpenAI Compatible API Server:**
    ```bash
    python openai_compat.py
    ```
-   默认地址: `http://localhost:28889`
+   Default address: `http://localhost:8010`
 
-### 支持的模型
+### Using the API
 
-Warp2Api 支持以下 AI 模型：
+Once both servers are running, you can use any OpenAI-compatible client:
 
-#### Anthropic Claude 系列
-- `claude-4-sonnet` - Claude 4 Sonnet 模型
-- `claude-4-opus` - Claude 4 Opus 模型
-- `claude-4.1-opus` - Claude 4.1 Opus 模型
-
-#### Google Gemini 系列
-- `gemini-2.5-pro` - Gemini 2.5 Pro 模型
-
-#### OpenAI GPT 系列
-- `gpt-4.1` - GPT-4.1 模型
-- `gpt-4o` - GPT-4o 模型
-- `gpt-5` - GPT-5 基础模型
-- `gpt-5 (high reasoning)` - GPT-5 高推理模式
-
-#### OpenAI o系列
-- `o3` - o3 模型
-- `o4-mini` - o4-mini 模型
-
-### 使用 API
-
-#### 🔓 认证说明
-**重要：Warp2Api 的 OpenAI 兼容接口不需要 API key 验证！**
-
-- 服务器会自动处理 Warp 服务的认证
-- 客户端可以发送任意的 `api_key` 值（或完全省略）
-- 所有请求都会使用系统自动获取的匿名 JWT token
-
-两个服务器都运行后，您可以使用任何 OpenAI 兼容的客户端:
-
-#### Python 示例
 ```python
 import openai
 
 client = openai.OpenAI(
-    base_url="http://localhost:28889/v1",
-    api_key="dummy"  # 可选：某些客户端需要，但服务器不强制验证
+    base_url="http://localhost:8010/v1",
+    api_key="dummy"  # Not required, but some clients need it
 )
 
 response = client.chat.completions.create(
-    model="claude-4-sonnet",  # 选择支持的模型
+    model="claude-3-sonnet",  # Model name will be passed through
     messages=[
-        {"role": "user", "content": "你好，你好吗？"}
+        {"role": "user", "content": "Hello, how are you?"}
     ],
     stream=True
 )
@@ -184,249 +137,157 @@ for chunk in response:
         print(chunk.choices[0].delta.content, end="")
 ```
 
-#### cURL 示例
-```bash
-# 基本请求
-curl -X POST http://localhost:28889/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "claude-4-sonnet",
-    "messages": [
-      {"role": "user", "content": "你好，请介绍一下你自己"}
-    ],
-    "stream": true
-  }'
+### Available Endpoints
 
-# 指定其他模型
-curl -X POST http://localhost:28889/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "gpt-5",
-    "messages": [
-      {"role": "user", "content": "解释量子计算的基本原理"}
-    ],
-    "temperature": 0.7,
-    "max_tokens": 1000
-  }'
-```
+#### Protobuf Bridge Server (`http://localhost:8000`)
+- `GET /healthz` - Health check
+- `POST /encode` - Encode JSON to protobuf
+- `POST /decode` - Decode protobuf to JSON
+- `WebSocket /ws` - Real-time monitoring
 
-#### JavaScript/Node.js 示例
-```javascript
-const OpenAI = require('openai');
+#### OpenAI API Server (`http://localhost:8010`)
+- `GET /` - Service status
+- `GET /healthz` - Health check
+- `POST /v1/chat/completions` - OpenAI Chat Completions compatible endpoint
 
-const client = new OpenAI({
-  baseURL: 'http://localhost:28889/v1',
-  apiKey: 'dummy'  // 可选：某些客户端需要，但服务器不强制验证
-});
-
-async function main() {
-  const completion = await client.chat.completions.create({
-    model: 'gemini-2.5-pro',
-    messages: [
-      { role: 'user', content: '写一个简单的Hello World程序' }
-    ],
-    stream: true
-  });
-
-  for await (const chunk of completion) {
-    process.stdout.write(chunk.choices[0]?.delta?.content || '');
-  }
-}
-
-main();
-```
-
-### 模型选择建议
-
-- **编程任务**: 推荐使用 `claude-4-sonnet` 或 `gpt-5`
-- **创意写作**: 推荐使用 `claude-4-opus` 或 `gpt-4o`
-- **代码审查**: 推荐使用 `claude-4.1-opus`
-- **推理任务**: 推荐使用 `gpt-5 (high reasoning)` 或 `o3`
-- **轻量任务**: 推荐使用 `o4-mini` 或 `gpt-4o`
-
-### 可用端点
-
-#### Protobuf 桥接服务器 (`http://localhost:28888`)
-- `GET /healthz` - 健康检查
-- `POST /encode` - 将 JSON 编码为 protobuf
-- `POST /decode` - 将 protobuf 解码为 JSON
-- `WebSocket /ws` - 实时监控
-
-#### OpenAI API 服务器 (`http://localhost:28889`)
-- `GET /` - 服务状态
-- `GET /healthz` - 健康检查
-- `POST /v1/chat/completions` - OpenAI Chat Completions 兼容端点
-
-## 🏗️ 架构
+## 🏗️ Architecture
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│    客户端应用     │───▶│  OpenAI API     │───▶│   Protobuf      │
-│  (OpenAI SDK)   │    │     服务器      │    │    桥接服务器    │
-└─────────────────┘    │  (端口 28889)   │    │  (端口 28888)   │
-                        └─────────────────┘    └─────────────────┘
-                                                        │
-                                                        ▼
-                                               ┌─────────────────┐
-                                               │    Warp AI      │
-                                               │      服务       │
-                                               └─────────────────┘
+│  Client App     │───▶│  OpenAI API     │───▶│   Protobuf      │
+│  (OpenAI SDK)   │    │     Server      │    │  Bridge Server  │
+└─────────────────┘    │  (Port 8010)    │    │  (Port 8000)    │
+                       └─────────────────┘    └─────────────────┘
+                                                       │
+                                                       ▼
+                                              ┌─────────────────┐
+                                              │    Warp AI      │
+                                              │    Service      │
+                                              └─────────────────┘
 ```
 
-### 核心组件
+### Core Components
 
-- **`protobuf2openai/`**: OpenAI API 兼容层
-  - 消息格式转换
-  - 流式响应处理
-  - 错误映射和验证
+- **`protobuf2openai/`**: OpenAI API compatibility layer
+  - Message format conversion
+  - Streaming response handling
+  - Error mapping and validation
 
-- **`warp2protobuf/`**: Warp protobuf 通信层
-  - JWT 认证管理
-  - Protobuf 编解码
-  - WebSocket 监控
-  - 请求路由和验证
+- **`warp2protobuf/`**: Warp protobuf communication layer
+  - JWT authentication management
+  - Protobuf encoding/decoding
+  - WebSocket monitoring
+  - Request routing and validation
 
-## 🔧 配置
+## 🔧 Configuration
 
-### 环境变量
+### Environment Variables
 
-| 变量 | 描述 | 默认值 |
-|------|------|--------|
-| `WARP_JWT` | Warp 认证 JWT 令牌 | 自动获取 |
-| `WARP_REFRESH_TOKEN` | JWT 刷新令牌 | 可选 |
-| `WARP_BRIDGE_URL` | Protobuf 桥接服务器 URL | `http://127.0.0.1:28888` |
-| `HTTP_PROXY` | HTTP 代理设置 | 空（禁用代理） |
-| `HTTPS_PROXY` | HTTPS 代理设置 | 空（禁用代理） |
-| `NO_PROXY` | 不使用代理的主机 | `127.0.0.1,localhost` |
-| `HOST` | 服务器主机地址 | `127.0.0.1` |
-| `PORT` | OpenAI API 服务器端口 | `28889` |
-| `API_TOKEN` | API接口认证令牌 | `0000`（自动设置） |
-| `W2A_VERBOSE` | 启用详细日志输出 | `false` |
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `WARP_JWT` | Warp authentication JWT token | Required |
+| `WARP_REFRESH_TOKEN` | JWT refresh token | Required |
+| `HOST` | Server host address | `127.0.0.1` |
+| `PORT` | OpenAI API server port | `8010` |
+| `BRIDGE_BASE_URL` | Protobuf bridge server URL | `http://localhost:8000` |
 
-### 项目脚本
+### Project Scripts
 
-在 `pyproject.toml` 中定义:
+Defined in `pyproject.toml`:
 
 ```bash
-# 启动 protobuf 桥接服务器
+# Start protobuf bridge server
 warp-server
 
-# 启动 OpenAI API 服务器  
+# Start OpenAI API server
 warp-test
 ```
 
-## 🔐 认证
+## 🔐 Authentication
 
-服务会自动处理 Warp 认证:
+The service automatically handles Warp authentication:
 
-1. **JWT 管理**: 自动令牌验证和刷新
-2. **匿名访问**: 在需要时回退到匿名令牌
-3. **令牌持久化**: 安全的令牌存储和重用
+1. **JWT Management**: Automatic token validation and refresh
+2. **Anonymous Access**: Falls back to anonymous tokens when needed
+3. **Token Persistence**: Secure token storage and reuse
 
-## 🧪 开发
+## 🧪 Development
 
-### 项目结构
+### Project Structure
 
 ```
 Warp2Api/
-├── protobuf2openai/          # OpenAI API 兼容层
-│   ├── app.py               # FastAPI 应用程序
-│   ├── router.py            # API 路由
-│   ├── models.py            # Pydantic 模型
-│   ├── bridge.py            # 桥接初始化
-│   └── sse_transform.py     # 服务器发送事件
-├── warp2protobuf/           # Warp protobuf 层
-│   ├── api/                 # API 路由
-│   ├── core/                # 核心功能
-│   │   ├── auth.py          # 认证
-│   │   ├── protobuf_utils.py # Protobuf 工具
-│   │   └── logging.py       # 日志设置
-│   ├── config/              # 配置
-│   └── warp/                # Warp 特定代码
-├── server.py                # Protobuf 桥接服务器
-├── openai_compat.py         # OpenAI API 服务器
-├── start.sh                 # Linux/macOS 启动脚本
-├── stop.sh                  # Linux/macOS 停止脚本
-├── test.sh                  # Linux/macOS 测试脚本
-├── start.bat                # Windows 批处理启动脚本
-├── stop.bat                 # Windows 批处理停止脚本
-├── test.bat                 # Windows 批处理测试脚本
-├── start.ps1                # Windows PowerShell 启动脚本
-├── docs/                    # 项目文档
-│   ├── TROUBLESHOOTING.md   # 故障排除指南
-│   └── screenshots/         # 项目截图
-└── pyproject.toml           # 项目配置
+├── protobuf2openai/          # OpenAI API compatibility layer
+│   ├── app.py               # FastAPI application
+│   ├── router.py            # API routes
+│   ├── models.py            # Pydantic models
+│   ├── bridge.py            # Bridge initialization
+│   └── sse_transform.py     # Server-sent events
+├── warp2protobuf/           # Warp protobuf layer
+│   ├── api/                 # API routes
+│   ├── core/                # Core functionality
+│   │   ├── auth.py          # Authentication
+│   │   ├── protobuf_utils.py # Protobuf utilities
+│   │   └── logging.py       # Logging setup
+│   ├── config/              # Configuration
+│   └── warp/                # Warp-specific code
+├── server.py                # Protobuf bridge server
+├── openai_compat.py         # OpenAI API server
+└── pyproject.toml           # Project configuration
 ```
 
-### 截图演示
+### Dependencies
 
-项目运行截图和界面演示请查看 [`docs/screenshots/`](docs/screenshots/) 文件夹。
+Main dependencies include:
+- **FastAPI**: Modern, fast web framework
+- **Uvicorn**: ASGI server implementation
+- **HTTPx**: Async HTTP client with HTTP/2 support
+- **Protobuf**: Protocol buffer support
+- **WebSockets**: WebSocket communication
+- **OpenAI**: For type compatibility
 
-## 📋 文档
+## 🐛 Troubleshooting
 
-主要依赖项包括:
-- **FastAPI**: 现代、快速的 Web 框架
-- **Uvicorn**: ASGI 服务器实现
-- **HTTPx**: 支持 HTTP/2 的异步 HTTP 客户端
-- **Protobuf**: Protocol buffer 支持
-- **WebSockets**: WebSocket 通信
-- **OpenAI**: 用于类型兼容性
+### Common Issues
 
-## 🐛 故障排除
+1. **JWT Token Expiration**
+   - The service automatically refreshes tokens
+   - Check logs for authentication errors
+   - Verify that `WARP_REFRESH_TOKEN` is valid
 
-详细的故障排除指南请参考 [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)
+2. **Bridge Server Not Ready**
+   - Ensure the protobuf bridge server is running first
+   - Check `BRIDGE_BASE_URL` configuration
+   - Verify port availability
 
-### 常见问题
+3. **Connection Errors**
+   - Check network connectivity to Warp services
+   - Verify firewall settings
+   - Check proxy configuration if applicable
 
-1. **"Server disconnected without sending a response" 错误**
-    - 检查 `.env` 文件中的 `WARP_BRIDGE_URL` 配置是否正确
-    - 确保代理设置已禁用：`HTTP_PROXY=`, `HTTPS_PROXY=`, `NO_PROXY=127.0.0.1,localhost`
-    - 验证桥接服务器是否在端口 28888 上运行
-    - 检查防火墙是否阻止了本地连接
+### Logging
 
-2. **JWT 令牌过期**
-    - 服务会自动刷新令牌
-    - 检查日志中的认证错误
-    - 验证 `WARP_REFRESH_TOKEN` 是否有效
+Both servers provide detailed logging:
+- Authentication status and token refresh
+- Request/response handling
+- Error details and stack traces
+- Performance metrics
 
-3. **桥接服务器未就绪**
-    - 确保首先运行 protobuf 桥接服务器
-    - 检查 `WARP_BRIDGE_URL` 配置（应为 `http://127.0.0.1:28888`）
-    - 验证端口可用性
+## 📄 License
 
-4. **代理连接错误**
-    - 如果遇到 `ProxyError` 或端口 1082 错误
-    - 在 `.env` 文件中设置：`HTTP_PROXY=`, `HTTPS_PROXY=`, `NO_PROXY=127.0.0.1,localhost`
-    - 或者在系统环境中禁用代理
+This project is configured for internal use. Please contact the project maintainers for licensing terms.
 
-5. **连接错误**
-    - 检查到 Warp 服务的网络连接
-    - 验证防火墙设置
-    - 确保本地端口 28888 和 28889 未被其他应用占用
+## 🤝 Contributing
 
-### 日志记录
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests if applicable
+5. Submit a pull request
 
-两个服务器都提供详细的日志记录:
-- 认证状态和令牌刷新
-- 请求/响应处理
-- 错误详情和堆栈跟踪
-- 性能指标
+## 📞 Support
 
-## 📄 许可证
-
-该项目配置为内部使用。请与项目维护者联系了解许可条款。
-
-## 🤝 贡献
-
-1. Fork 仓库
-2. 创建功能分支
-3. 进行更改
-4. 如适用，添加测试
-5. 提交 pull request
-
-## 📞 支持
-
-如有问题和疑问:
-1. 查看故障排除部分
-2. 查看服务器日志获取错误详情
-3. 创建包含重现步骤的 issue
+For issues and questions:
+1. Check the troubleshooting section
+2. Review server logs for error details
+3. Create an issue with reproduction steps

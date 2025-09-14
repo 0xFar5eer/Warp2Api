@@ -7,7 +7,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 import requests
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from .logging import logger
@@ -20,7 +20,6 @@ from .state import STATE
 from .config import BRIDGE_BASE_URL
 from .bridge import initialize_once
 from .sse_transform import stream_openai_sse
-from .auth import authenticate_request
 
 
 router = APIRouter()
@@ -40,7 +39,8 @@ def health_check():
 def list_models():
     """OpenAI-compatible model listing. Forwards to bridge, with local fallback."""
     try:
-        resp = requests.get(f"{BRIDGE_BASE_URL}/v1/models", timeout=10.0)
+        # Don't use proxy for localhost connections
+        resp = requests.get(f"{BRIDGE_BASE_URL}/v1/models", timeout=10.0, proxies={'http': None, 'https': None})
         if resp.status_code != 200:
             raise HTTPException(resp.status_code, f"bridge_error: {resp.text}")
         return resp.json()
@@ -55,36 +55,32 @@ def list_models():
 
 
 @router.post("/v1/chat/completions")
-async def chat_completions(req: ChatCompletionsRequest, request: Request = None):
-    # 认证检查
-    if request:
-        await authenticate_request(request)
-
+async def chat_completions(req: ChatCompletionsRequest):
     try:
         initialize_once()
     except Exception as e:
         logger.warning(f"[OpenAI Compat] initialize_once failed or skipped: {e}")
 
     if not req.messages:
-        raise HTTPException(400, "messages 不能为空")
+        raise HTTPException(400, "messages cannot be empty")
 
-    # 1) 打印接收到的 Chat Completions 原始请求体
+    # 1) Log the received Chat Completions raw request body
     try:
-        logger.info("[OpenAI Compat] 接收到的 Chat Completions 请求体(原始): %s", json.dumps(req.dict(), ensure_ascii=False))
+        logger.info("[OpenAI Compat] Received Chat Completions request body (raw): %s", json.dumps(req.dict(), ensure_ascii=False))
     except Exception:
-        logger.info("[OpenAI Compat] 接收到的 Chat Completions 请求体(原始) 序列化失败")
+        logger.info("[OpenAI Compat] Failed to serialize received Chat Completions request body (raw)")
 
-    # 整理消息
+    # Organize messages
     history: List[ChatMessage] = reorder_messages_for_anthropic(list(req.messages))
 
-    # 2) 打印整理后的请求体（post-reorder）
+    # 2) Log the organized request body (post-reorder)
     try:
-        logger.info("[OpenAI Compat] 整理后的请求体(post-reorder): %s", json.dumps({
+        logger.info("[OpenAI Compat] Organized request body (post-reorder): %s", json.dumps({
             **req.dict(),
             "messages": [m.dict() for m in history]
         }, ensure_ascii=False))
     except Exception:
-        logger.info("[OpenAI Compat] 整理后的请求体(post-reorder) 序列化失败")
+        logger.info("[OpenAI Compat] Failed to serialize organized request body (post-reorder)")
 
     system_prompt_text: Optional[str] = None
     try:
@@ -132,11 +128,11 @@ async def chat_completions(req: ChatCompletionsRequest, request: Request = None)
         if mcp_tools:
             packet.setdefault("mcp_context", {}).setdefault("tools", []).extend(mcp_tools)
 
-    # 3) 打印转换成 protobuf JSON 的请求体（发送到 bridge 的数据包）
+    # 3) Log the request body converted to protobuf JSON (packet sent to bridge)
     try:
-        logger.info("[OpenAI Compat] 转换成 Protobuf JSON 的请求体: %s", json.dumps(packet, ensure_ascii=False))
+        logger.info("[OpenAI Compat] Request body converted to Protobuf JSON: %s", json.dumps(packet, ensure_ascii=False))
     except Exception:
-        logger.info("[OpenAI Compat] 转换成 Protobuf JSON 的请求体 序列化失败")
+        logger.info("[OpenAI Compat] Failed to serialize request body converted to Protobuf JSON")
 
     created_ts = int(time.time())
     completion_id = str(uuid.uuid4())
@@ -149,17 +145,20 @@ async def chat_completions(req: ChatCompletionsRequest, request: Request = None)
         return StreamingResponse(_agen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "Connection": "keep-alive"})
 
     def _post_once() -> requests.Response:
+        # Don't use proxy for localhost connections
         return requests.post(
             f"{BRIDGE_BASE_URL}/api/warp/send_stream",
             json={"json_data": packet, "message_type": "warp.multi_agent.v1.Request"},
             timeout=(5.0, 180.0),
+            proxies={'http': None, 'https': None}
         )
 
     try:
         resp = _post_once()
         if resp.status_code == 429:
             try:
-                r = requests.post(f"{BRIDGE_BASE_URL}/api/auth/refresh", timeout=10.0)
+                # Don't use proxy for localhost connections
+                r = requests.post(f"{BRIDGE_BASE_URL}/api/auth/refresh", timeout=10.0, proxies={'http': None, 'https': None})
                 logger.warning("[OpenAI Compat] Bridge returned 429. Tried JWT refresh -> HTTP %s", getattr(r, 'status_code', 'N/A'))
             except Exception as _e:
                 logger.warning("[OpenAI Compat] JWT refresh attempt failed after 429: %s", _e)

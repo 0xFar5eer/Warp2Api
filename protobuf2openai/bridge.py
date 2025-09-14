@@ -31,7 +31,8 @@ def bridge_send_stream(packet: Dict[str, Any]) -> Dict[str, Any]:
                 logger.info("[OpenAI Compat] Bridge request payload: %s", json.dumps(wrapped_packet, ensure_ascii=False))
             except Exception:
                 logger.info("[OpenAI Compat] Bridge request payload serialization failed for URL %s", url)
-            r = requests.post(url, json=wrapped_packet, timeout=(5.0, 180.0))
+            # Don't use proxy for localhost connections
+            r = requests.post(url, json=wrapped_packet, timeout=(5.0, 180.0), proxies={'http': None, 'https': None})
             if r.status_code == 200:
                 try:
                     logger.info("[OpenAI Compat] Bridge response (raw text): %s", r.text)
@@ -66,7 +67,8 @@ def initialize_once() -> None:
             last_err = None
             for h in health_urls:
                 try:
-                    resp = requests.get(h, timeout=5.0)
+                    # Don't use proxy for localhost connections
+                    resp = requests.get(h, timeout=5.0, proxies={'http': None, 'https': None})
                     if resp.status_code == 200:
                         ok = True
                         break

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Warp API客户端模块
+Warp API client module
 
-处理与Warp API的通信，包括protobuf数据发送和SSE响应解析。
+Handles communication with Warp API, including protobuf data sending and SSE response parsing.
 """
 import httpx
 import os
@@ -62,14 +62,14 @@ def _get_event_type(event_data: dict) -> str:
 async def send_protobuf_to_warp_api(
     protobuf_bytes: bytes, show_all_events: bool = True
 ) -> tuple[str, Optional[str], Optional[str]]:
-    """发送protobuf数据到Warp API并获取响应"""
+    """Send protobuf data to Warp API and get response"""
     try:
-        logger.info(f"发送 {len(protobuf_bytes)} 字节到Warp API")
-        logger.info(f"数据包前32字节 (hex): {protobuf_bytes[:32].hex()}")
+        logger.info(f"Sending {len(protobuf_bytes)} bytes to Warp API")
+        logger.info(f"Packet first 32 bytes (hex): {protobuf_bytes[:32].hex()}")
         
         warp_url = CONFIG_WARP_URL
         
-        logger.info(f"发送请求到: {warp_url}")
+        logger.info(f"Sending request to: {warp_url}")
         
         conversation_id = None
         task_id = None
@@ -83,8 +83,10 @@ async def send_protobuf_to_warp_api(
             verify_opt = False
             logger.warning("TLS verification disabled via WARP_INSECURE_TLS for Warp API client")
 
-        async with httpx.AsyncClient(http2=True, timeout=httpx.Timeout(60.0), verify=verify_opt, trust_env=True) as client:
-            # 最多尝试两次：第一次失败且为配额429时申请匿名token并重试一次
+        # Only use proxy for actual Warp API URLs, not for localhost
+        use_proxy = not any(x in warp_url.lower() for x in ['localhost', '127.0.0.1', '0.0.0.0'])
+        async with httpx.AsyncClient(http2=True, timeout=httpx.Timeout(60.0), verify=verify_opt, trust_env=use_proxy) as client:
+            # Try at most twice: if first attempt fails with quota 429, acquire anonymous token and retry once
             for attempt in range(2):
                 jwt = await get_valid_jwt() if attempt == 0 else jwt  # keep existing unless refreshed explicitly
                 headers = {
@@ -101,29 +103,29 @@ async def send_protobuf_to_warp_api(
                     if response.status_code != 200:
                         error_text = await response.aread()
                         error_content = error_text.decode('utf-8') if error_text else "No error content"
-                        # 检测配额耗尽错误并在第一次失败时尝试申请匿名token
+                        # Detect quota exhaustion error and try to acquire anonymous token on first failure
                         if response.status_code == 429 and attempt == 0 and (
                             ("No remaining quota" in error_content) or ("No AI requests remaining" in error_content)
                         ):
-                            logger.warning("WARP API 返回 429 (配额用尽)。尝试申请匿名token并重试一次…")
+                            logger.warning("WARP API returned 429 (quota exhausted). Attempting to acquire anonymous token and retry once...")
                             try:
                                 new_jwt = await acquire_anonymous_access_token()
                             except Exception:
                                 new_jwt = None
                             if new_jwt:
                                 jwt = new_jwt
-                                # 跳出当前响应并进行下一次尝试
+                                # Break out of current response and proceed to next attempt
                                 continue
                             else:
-                                logger.error("匿名token申请失败，无法重试。")
+                                logger.error("Anonymous token acquisition failed, cannot retry.")
                                 logger.error(f"WARP API HTTP ERROR {response.status_code}: {error_content}")
                                 return f"❌ Warp API Error (HTTP {response.status_code}): {error_content}", None, None
-                        # 其他错误或第二次失败
+                        # Other errors or second failure
                         logger.error(f"WARP API HTTP ERROR {response.status_code}: {error_content}")
                         return f"❌ Warp API Error (HTTP {response.status_code}): {error_content}", None, None
                     
-                    logger.info(f"✅ 收到HTTP {response.status_code}响应")
-                    logger.info("开始处理SSE事件流...")
+                    logger.info(f"✅ Received HTTP {response.status_code} response")
+                    logger.info("Starting to process SSE event stream...")
                     
                     import re as _re
                     def _parse_payload_bytes(data_str: str):
@@ -153,7 +155,7 @@ async def send_protobuf_to_warp_api(
                             if not payload:
                                 continue
                             if payload == "[DONE]":
-                                logger.info("收到[DONE]标记，结束处理")
+                                logger.info("Received [DONE] marker, ending processing")
                                 break
                             current_data += payload
                             continue
@@ -162,12 +164,12 @@ async def send_protobuf_to_warp_api(
                             raw_bytes = _parse_payload_bytes(current_data)
                             current_data = ""
                             if raw_bytes is None:
-                                logger.debug("跳过无法解析的SSE数据块（非hex/base64或不完整）")
+                                logger.debug("Skipping unparseable SSE data block (not hex/base64 or incomplete)")
                                 continue
                             try:
                                 event_data = protobuf_to_dict(raw_bytes, "warp.multi_agent.v1.ResponseEvent")
                             except Exception as parse_error:
-                                logger.debug(f"解析事件失败，跳过: {str(parse_error)[:100]}")
+                                logger.debug(f"Failed to parse event, skipping: {str(parse_error)[:100]}")
                                 continue
                             event_count += 1
                             
@@ -188,7 +190,7 @@ async def send_protobuf_to_warp_api(
                                 init_data = event_data["init"]
                                 conversation_id = init_data.get("conversation_id", conversation_id)
                                 task_id = init_data.get("task_id", task_id)
-                                logger.info(f"会话初始化: {conversation_id}")
+                                logger.info(f"Session initialized: {conversation_id}")
                                 client_actions = _get(event_data, "client_actions", "clientActions")
                                 if isinstance(client_actions, dict):
                                     actions = _get(client_actions, "actions", "Actions") or []
@@ -246,14 +248,14 @@ async def send_protobuf_to_warp_api(
 
 
 async def send_protobuf_to_warp_api_parsed(protobuf_bytes: bytes) -> tuple[str, Optional[str], Optional[str], list]:
-    """发送protobuf数据到Warp API并获取解析后的SSE事件数据"""
+    """Send protobuf data to Warp API and get parsed SSE event data"""
     try:
-        logger.info(f"发送 {len(protobuf_bytes)} 字节到Warp API (解析模式)")
-        logger.info(f"数据包前32字节 (hex): {protobuf_bytes[:32].hex()}")
+        logger.info(f"Sending {len(protobuf_bytes)} bytes to Warp API (parse mode)")
+        logger.info(f"Packet first 32 bytes (hex): {protobuf_bytes[:32].hex()}")
         
         warp_url = CONFIG_WARP_URL
         
-        logger.info(f"发送请求到: {warp_url}")
+        logger.info(f"Sending request to: {warp_url}")
         
         conversation_id = None
         task_id = None
@@ -267,8 +269,10 @@ async def send_protobuf_to_warp_api_parsed(protobuf_bytes: bytes) -> tuple[str, 
             verify_opt = False
             logger.warning("TLS verification disabled via WARP_INSECURE_TLS for Warp API client")
 
-        async with httpx.AsyncClient(http2=True, timeout=httpx.Timeout(60.0), verify=verify_opt, trust_env=True) as client:
-            # 最多尝试两次：第一次失败且为配额429时申请匿名token并重试一次
+        # Only use proxy for actual Warp API URLs, not for localhost
+        use_proxy = not any(x in warp_url.lower() for x in ['localhost', '127.0.0.1', '0.0.0.0'])
+        async with httpx.AsyncClient(http2=True, timeout=httpx.Timeout(60.0), verify=verify_opt, trust_env=use_proxy) as client:
+            # Try at most twice: if first attempt fails with quota 429, acquire anonymous token and retry once
             for attempt in range(2):
                 jwt = await get_valid_jwt() if attempt == 0 else jwt  # keep existing unless refreshed explicitly
                 headers = {
@@ -285,29 +289,29 @@ async def send_protobuf_to_warp_api_parsed(protobuf_bytes: bytes) -> tuple[str, 
                     if response.status_code != 200:
                         error_text = await response.aread()
                         error_content = error_text.decode('utf-8') if error_text else "No error content"
-                        # 检测配额耗尽错误并在第一次失败时尝试申请匿名token
+                        # Detect quota exhaustion error and try to acquire anonymous token on first failure
                         if response.status_code == 429 and attempt == 0 and (
                             ("No remaining quota" in error_content) or ("No AI requests remaining" in error_content)
                         ):
-                            logger.warning("WARP API 返回 429 (配额用尽, 解析模式)。尝试申请匿名token并重试一次…")
+                            logger.warning("WARP API returned 429 (quota exhausted, parse mode). Attempting to acquire anonymous token and retry once...")
                             try:
                                 new_jwt = await acquire_anonymous_access_token()
                             except Exception:
                                 new_jwt = None
                             if new_jwt:
                                 jwt = new_jwt
-                                # 跳出当前响应并进行下一次尝试
+                                # Break out of current response and proceed to next attempt
                                 continue
                             else:
-                                logger.error("匿名token申请失败，无法重试 (解析模式)。")
-                                logger.error(f"WARP API HTTP ERROR (解析模式) {response.status_code}: {error_content}")
+                                logger.error("Anonymous token acquisition failed, cannot retry (parse mode).")
+                                logger.error(f"WARP API HTTP ERROR (parse mode) {response.status_code}: {error_content}")
                                 return f"❌ Warp API Error (HTTP {response.status_code}): {error_content}", None, None, []
-                        # 其他错误或第二次失败
-                        logger.error(f"WARP API HTTP ERROR (解析模式) {response.status_code}: {error_content}")
+                        # Other errors or second failure
+                        logger.error(f"WARP API HTTP ERROR (parse mode) {response.status_code}: {error_content}")
                         return f"❌ Warp API Error (HTTP {response.status_code}): {error_content}", None, None, []
                     
-                    logger.info(f"✅ 收到HTTP {response.status_code}响应 (解析模式)")
-                    logger.info("开始处理SSE事件流...")
+                    logger.info(f"✅ Received HTTP {response.status_code} response (parse mode)")
+                    logger.info("Starting to process SSE event stream...")
                     
                     import re as _re2
                     def _parse_payload_bytes2(data_str: str):
@@ -337,7 +341,7 @@ async def send_protobuf_to_warp_api_parsed(protobuf_bytes: bytes) -> tuple[str, 
                             if not payload:
                                 continue
                             if payload == "[DONE]":
-                                logger.info("收到[DONE]标记，结束处理")
+                                logger.info("Received [DONE] marker, ending processing")
                                 break
                             current_data += payload
                             continue
@@ -346,7 +350,7 @@ async def send_protobuf_to_warp_api_parsed(protobuf_bytes: bytes) -> tuple[str, 
                             raw_bytes = _parse_payload_bytes2(current_data)
                             current_data = ""
                             if raw_bytes is None:
-                                logger.debug("跳过无法解析的SSE数据块（非hex/base64或不完整）")
+                                logger.debug("Skipping unparseable SSE data block (not hex/base64 or incomplete)")
                                 continue
                             try:
                                 event_data = protobuf_to_dict(raw_bytes, "warp.multi_agent.v1.ResponseEvent")
@@ -367,7 +371,7 @@ async def send_protobuf_to_warp_api_parsed(protobuf_bytes: bytes) -> tuple[str, 
                                     init_data = event_data["init"]
                                     conversation_id = init_data.get("conversation_id", conversation_id)
                                     task_id = init_data.get("task_id", task_id)
-                                    logger.info(f"会话初始化: {conversation_id}")
+                                    logger.info(f"Session initialized: {conversation_id}")
                                 
                                 client_actions = _get(event_data, "client_actions", "clientActions")
                                 if isinstance(client_actions, dict):
@@ -395,12 +399,12 @@ async def send_protobuf_to_warp_api_parsed(protobuf_bytes: bytes) -> tuple[str, 
                                                         complete_response.append(text_content)
                                                         logger.info(f"   📝 Complete Message: {text_content[:100]}...")
                             except Exception as parse_err:
-                                logger.debug(f"解析事件失败，跳过: {str(parse_err)[:100]}")
+                                logger.debug(f"Failed to parse event, skipping: {str(parse_err)[:100]}")
                                 continue
                     
                     full_response = "".join(complete_response)
                     logger.info("="*60)
-                    logger.info("📊 SSE STREAM SUMMARY (解析模式)")
+                    logger.info("📊 SSE STREAM SUMMARY (parse mode)")
                     logger.info("="*60)
                     logger.info(f"📈 Total Events Processed: {event_count}")
                     logger.info(f"🆔 Conversation ID: {conversation_id}")
@@ -409,12 +413,12 @@ async def send_protobuf_to_warp_api_parsed(protobuf_bytes: bytes) -> tuple[str, 
                     logger.info(f"🎯 Parsed Events Count: {len(parsed_events)}")
                     logger.info("="*60)
                     
-                    logger.info(f"✅ Stream processing completed successfully (解析模式)")
+                    logger.info(f"✅ Stream processing completed successfully (parse mode)")
                     return full_response, conversation_id, task_id, parsed_events
     except Exception as e:
         import traceback
         logger.error("="*60)
-        logger.error("WARP API CLIENT EXCEPTION (解析模式)")
+        logger.error("WARP API CLIENT EXCEPTION (parse mode)")
         logger.error("="*60)
         logger.error(f"Exception Type: {type(e).__name__}")
         logger.error(f"Exception Message: {str(e)}")

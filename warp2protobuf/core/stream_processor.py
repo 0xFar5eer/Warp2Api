@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-流式数据包处理器
+Stream Packet Processor
 
-处理流式protobuf数据包，支持实时解析和WebSocket推送。
+Handles streaming protobuf packets, supporting real-time parsing and WebSocket pushing.
 """
 import asyncio
 import json
@@ -16,45 +16,45 @@ from .protobuf_utils import protobuf_to_dict
 
 
 class StreamProcessor:
-    """流式数据包处理器"""
+    """Stream packet processor"""
     
     def __init__(self, websocket_manager=None):
         self.websocket_manager = websocket_manager
         self.active_streams: Dict[str, StreamSession] = {}
         
     async def create_stream_session(self, stream_id: str, message_type: str = "warp.multi_agent.v1.Response") -> 'StreamSession':
-        """创建流式会话"""
+        """Create streaming session"""
         session = StreamSession(stream_id, message_type, self.websocket_manager)
         self.active_streams[stream_id] = session
-        
-        logger.info(f"创建流式会话: {stream_id}, 消息类型: {message_type}")
+
+        logger.info(f"Created streaming session: {stream_id}, message type: {message_type}")
         return session
     
     async def get_stream_session(self, stream_id: str) -> Optional['StreamSession']:
-        """获取流式会话"""
+        """Get streaming session"""
         return self.active_streams.get(stream_id)
     
     async def close_stream_session(self, stream_id: str):
-        """关闭流式会话"""
+        """Close streaming session"""
         if stream_id in self.active_streams:
             session = self.active_streams[stream_id]
             await session.close()
             del self.active_streams[stream_id]
-            logger.info(f"关闭流式会话: {stream_id}")
+            logger.info(f"Closed streaming session: {stream_id}")
     
     async def process_stream_chunk(self, stream_id: str, chunk_data: bytes) -> Dict[str, Any]:
-        """处理流式数据块"""
+        """Process stream chunk"""
         session = await self.get_stream_session(stream_id)
         if not session:
-            raise ValueError(f"流式会话不存在: {stream_id}")
+            raise ValueError(f"Streaming session does not exist: {stream_id}")
         
         return await session.process_chunk(chunk_data)
     
     async def finalize_stream(self, stream_id: str) -> Dict[str, Any]:
-        """完成流式处理"""
+        """Finalize stream processing"""
         session = await self.get_stream_session(stream_id)
         if not session:
-            raise ValueError(f"流式会话不存在: {stream_id}")
+            raise ValueError(f"Streaming session does not exist: {stream_id}")
         
         result = await session.finalize()
         await self.close_stream_session(stream_id)
@@ -62,7 +62,7 @@ class StreamProcessor:
 
 
 class StreamSession:
-    """流式会话"""
+    """Streaming session"""
     
     def __init__(self, session_id: str, message_type: str, websocket_manager=None):
         self.session_id = session_id
@@ -78,12 +78,12 @@ class StreamSession:
         self.complete_message: Optional[Dict] = None
         
     async def process_chunk(self, chunk_data: bytes) -> Dict[str, Any]:
-        """处理单个数据块"""
+        """Process single data chunk"""
         self.chunk_count += 1
         self.total_size += len(chunk_data)
         self.chunks.append(chunk_data)
-        
-        logger.debug(f"流式会话 {self.session_id}: 处理数据块 {self.chunk_count}, 大小 {len(chunk_data)} 字节")
+
+        logger.debug(f"Streaming session {self.session_id}: processing chunk {self.chunk_count}, size {len(chunk_data)} bytes")
         
         chunk_result = {
             "chunk_index": self.chunk_count - 1,
@@ -108,7 +108,7 @@ class StreamSession:
         except Exception as e:
             chunk_result["error"] = str(e)
             chunk_result["parsed_successfully"] = False
-            logger.warning(f"数据块解析失败: {e}")
+            logger.warning(f"Chunk parsing failed: {e}")
             
             if self.websocket_manager:
                 await self.websocket_manager.broadcast({
@@ -120,10 +120,10 @@ class StreamSession:
         return chunk_result
     
     async def finalize(self) -> Dict[str, Any]:
-        """完成流式处理，尝试拼接完整消息"""
+        """Finalize stream processing, attempt to concatenate complete message"""
         duration = (datetime.now() - self.start_time).total_seconds()
-        
-        logger.info(f"流式会话 {self.session_id} 完成: {self.chunk_count} 块, 总大小 {self.total_size} 字节, 耗时 {duration:.2f}s")
+
+        logger.info(f"Streaming session {self.session_id} completed: {self.chunk_count} chunks, total size {self.total_size} bytes, duration {duration:.2f}s")
         
         result = {
             "session_id": self.session_id,
@@ -157,14 +157,14 @@ class StreamSession:
             
             self.complete_message = complete_json
             
-            logger.info(f"流式消息拼接成功: {len(complete_data)} 字节")
+            logger.info(f"Stream message concatenation successful: {len(complete_data)} bytes")
             
         except Exception as e:
             result["complete_message"] = {
                 "error": str(e),
                 "assembly_successful": False
             }
-            logger.warning(f"流式消息拼接失败: {e}")
+            logger.warning(f"Stream message concatenation failed: {e}")
         
         if self.websocket_manager:
             await self.websocket_manager.broadcast({
@@ -176,21 +176,21 @@ class StreamSession:
         return result
     
     async def close(self):
-        """关闭会话"""
+        """Close session"""
         self.chunks.clear()
         self.parsed_chunks.clear()
         self.complete_message = None
         
-        logger.debug(f"流式会话 {self.session_id} 已关闭")
+        logger.debug(f"Streaming session {self.session_id} closed")
 
 
 class StreamPacketAnalyzer:
-    """流式数据包分析器"""
+    """Stream packet analyzer"""
     
     @staticmethod
     def analyze_chunk_patterns(chunks: List[bytes]) -> Dict[str, Any]:
         if not chunks:
-            return {"error": "无数据块"}
+            return {"error": "No data chunks"}
         
         analysis = {
             "total_chunks": len(chunks),
@@ -308,14 +308,14 @@ class StreamPacketAnalyzer:
             current_path = f"{prefix}.{key}" if prefix else key
             
             if key not in dict1:
-                changes.append(f"添加: {current_path}")
+                changes.append(f"Added: {current_path}")
             elif key not in dict2:
-                changes.append(f"删除: {current_path}")
+                changes.append(f"Deleted: {current_path}")
             elif dict1[key] != dict2[key]:
                 if isinstance(dict1[key], dict) and isinstance(dict2[key], dict):
                     changes.extend(StreamPacketAnalyzer._compare_dicts(dict1[key], dict2[key], current_path))
                 else:
-                    changes.append(f"修改: {current_path}")
+                    changes.append(f"Modified: {current_path}")
         
         return changes[:10]
 

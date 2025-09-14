@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from .logging import logger
 
-# 全局固定的conversation_id - 所有请求都使用这个ID
+# Global fixed conversation_id - all requests use this ID
 FIXED_CONVERSATION_ID = "5b48d359-0715-479e-a158-0a00f2dfea36"
 
 

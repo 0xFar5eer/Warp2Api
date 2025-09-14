@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Protobuf编解码API路由
+Protobuf Encoding/Decoding API Routes
 
-提供纯protobuf数据包编解码服务，包括JWT管理和WebSocket支持。
+Provides pure protobuf packet encoding/decoding services, including JWT management and WebSocket support.
 """
 import json
 import base64
@@ -148,12 +148,12 @@ class ConnectionManager:
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
-        logger.info(f"WebSocket连接建立，当前连接数: {len(self.active_connections)}")
+        logger.info(f"WebSocket connection established, current connections: {len(self.active_connections)}")
     
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
-        logger.info(f"WebSocket连接断开，当前连接数: {len(self.active_connections)}")
+        logger.info(f"WebSocket connection closed, current connections: {len(self.active_connections)}")
     
     async def broadcast(self, message: Dict):
         if not self.active_connections:
@@ -164,7 +164,7 @@ class ConnectionManager:
             try:
                 await connection.send_json(message)
             except Exception as e:
-                logger.warning(f"发送WebSocket消息失败: {e}")
+                logger.warning(f"Failed to send WebSocket message: {e}")
                 disconnected.append(connection)
         for conn in disconnected:
             self.disconnect(conn)
@@ -188,7 +188,7 @@ class ConnectionManager:
 manager = ConnectionManager()
 set_websocket_manager(manager)
 
-app = FastAPI(title="Warp Protobuf编解码服务器", version="1.0.0")
+app = FastAPI(title="Warp Protobuf Encoding/Decoding Server", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -200,7 +200,7 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
-    return {"message": "Warp Protobuf编解码服务器", "version": "1.0.0"}
+    return {"message": "Warp Protobuf Encoding/Decoding Server", "version": "1.0.0"}
 
 
 @app.get("/healthz")
@@ -211,10 +211,10 @@ async def health_check():
 @app.post("/api/encode")
 async def encode_json_to_protobuf(request: EncodeRequest):
     try:
-        logger.info(f"收到编码请求，消息类型: {request.message_type}")
+        logger.info(f"Received encoding request, message type: {request.message_type}")
         actual_data = request.get_data()
         if not actual_data:
-            raise HTTPException(400, "数据包不能为空")
+            raise HTTPException(400, "Data packet cannot be empty")
         wrapped = {"json_data": actual_data}
         wrapped = sanitize_mcp_input_schema_in_packet(wrapped)
         actual_data = wrapped.get("json_data", actual_data)
@@ -223,53 +223,53 @@ async def encode_json_to_protobuf(request: EncodeRequest):
         try:
             await manager.log_packet("encode", actual_data, len(protobuf_bytes))
         except Exception as log_error:
-            logger.warning(f"数据包记录失败: {log_error}")
+            logger.warning(f"Failed to record data packet: {log_error}")
         result = {
             "protobuf_bytes": base64.b64encode(protobuf_bytes).decode('utf-8'),
             "size": len(protobuf_bytes),
             "message_type": request.message_type
         }
-        logger.info(f"✅ JSON编码为protobuf成功: {len(protobuf_bytes)} 字节")
+        logger.info(f"✅ JSON encoded to protobuf successfully: {len(protobuf_bytes)} bytes")
         return result
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ JSON编码失败: {e}")
-        raise HTTPException(500, f"编码失败: {str(e)}")
+        logger.error(f"❌ JSON encoding failed: {e}")
+        raise HTTPException(500, f"Encoding failed: {str(e)}")
 
 
 @app.post("/api/decode")
 async def decode_protobuf_to_json(request: DecodeRequest):
     try:
-        logger.info(f"收到解码请求，消息类型: {request.message_type}")
+        logger.info(f"Received decoding request, message type: {request.message_type}")
         if not request.protobuf_bytes or not request.protobuf_bytes.strip():
-            raise HTTPException(400, "Protobuf数据不能为空")
+            raise HTTPException(400, "Protobuf data cannot be empty")
         try:
             protobuf_bytes = base64.b64decode(request.protobuf_bytes)
         except Exception as decode_error:
-            logger.error(f"Base64解码失败: {decode_error}")
-            raise HTTPException(400, f"Base64解码失败: {str(decode_error)}")
+            logger.error(f"Base64 decoding failed: {decode_error}")
+            raise HTTPException(400, f"Base64 decoding failed: {str(decode_error)}")
         if not protobuf_bytes:
-            raise HTTPException(400, "解码后的protobuf数据为空")
+            raise HTTPException(400, "Decoded protobuf data is empty")
         json_data = protobuf_to_dict(protobuf_bytes, request.message_type)
         try:
             await manager.log_packet("decode", json_data, len(protobuf_bytes))
         except Exception as log_error:
-            logger.warning(f"数据包记录失败: {log_error}")
+            logger.warning(f"Failed to record data packet: {log_error}")
         result = {"json_data": json_data, "size": len(protobuf_bytes), "message_type": request.message_type}
-        logger.info(f"✅ Protobuf解码为JSON成功: {len(protobuf_bytes)} 字节")
+        logger.info(f"✅ Protobuf decoded to JSON successfully: {len(protobuf_bytes)} bytes")
         return result
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ Protobuf解码失败: {e}")
-        raise HTTPException(500, f"解码失败: {e}")
+        logger.error(f"❌ Protobuf decoding failed: {e}")
+        raise HTTPException(500, f"Decoding failed: {e}")
 
 
 @app.post("/api/stream-decode")
 async def decode_stream_protobuf(request: StreamDecodeRequest):
     try:
-        logger.info(f"收到流式解码请求，数据块数量: {len(request.protobuf_chunks)}")
+        logger.info(f"Received streaming decode request, chunk count: {len(request.protobuf_chunks)}")
         results = []
         total_size = 0
         for i, chunk_b64 in enumerate(request.protobuf_chunks):
@@ -281,7 +281,7 @@ async def decode_stream_protobuf(request: StreamDecodeRequest):
                 total_size += len(chunk_bytes)
                 await manager.log_packet(f"stream_decode_chunk_{i}", chunk_json, len(chunk_bytes))
             except Exception as e:
-                logger.warning(f"数据块 {i} 解码失败: {e}")
+                logger.warning(f"Chunk {i} decoding failed: {e}")
                 results.append({"chunk_index": i, "error": str(e), "size": 0})
         try:
             all_bytes = b''.join([base64.b64decode(chunk) for chunk in request.protobuf_chunks])
@@ -289,13 +289,13 @@ async def decode_stream_protobuf(request: StreamDecodeRequest):
             await manager.log_packet("stream_decode_complete", complete_json, len(all_bytes))
             complete_result = {"json_data": complete_json, "size": len(all_bytes)}
         except Exception as e:
-            complete_result = {"error": f"无法拼接完整消息: {e}", "size": total_size}
+            complete_result = {"error": f"Unable to concatenate complete message: {e}", "size": total_size}
         result = {"chunks": results, "complete": complete_result, "total_chunks": len(request.protobuf_chunks), "total_size": total_size, "message_type": request.message_type}
-        logger.info(f"✅ 流式protobuf解码完成: {len(request.protobuf_chunks)} 块，总大小 {total_size} 字节")
+        logger.info(f"✅ Streaming protobuf decode completed: {len(request.protobuf_chunks)} chunks, total size {total_size} bytes")
         return result
     except Exception as e:
-        logger.error(f"❌ 流式protobuf解码失败: {e}")
-        raise HTTPException(500, f"流式解码失败: {e}")
+        logger.error(f"❌ Streaming protobuf decode failed: {e}")
+        raise HTTPException(500, f"Streaming decode failed: {e}")
 
 
 @app.get("/api/schemas")
@@ -313,13 +313,13 @@ async def get_protobuf_schemas():
                     fields.append({"name": field.name, "type": field.type, "label": getattr(field, 'label', None), "number": field.number})
                 schemas.append({"name": msg_name, "full_name": descriptor.full_name, "field_count": len(fields), "fields": fields[:10]})
             except Exception as e:
-                logger.warning(f"获取schema {msg_name} 信息失败: {e}")
-        result = {"schemas": schemas, "total_count": len(schemas), "message": f"找到 {len(schemas)} 个protobuf消息类型"}
-        logger.info(f"✅ 返回 {len(schemas)} 个protobuf schema")
+                logger.warning(f"Failed to get schema {msg_name} info: {e}")
+        result = {"schemas": schemas, "total_count": len(schemas), "message": f"Found {len(schemas)} protobuf message types"}
+        logger.info(f"✅ Returned {len(schemas)} protobuf schemas")
         return result
     except Exception as e:
-        logger.error(f"❌ 获取protobuf schemas失败: {e}")
-        raise HTTPException(500, f"获取schemas失败: {e}")
+        logger.error(f"❌ Failed to get protobuf schemas: {e}")
+        raise HTTPException(500, f"Failed to get schemas: {e}")
 
 
 @app.get("/api/auth/status")
@@ -327,15 +327,15 @@ async def get_auth_status():
     try:
         jwt_token = get_jwt_token()
         if not jwt_token:
-            return {"authenticated": False, "message": "未找到JWT token", "suggestion": "运行 'uv run refresh_jwt.py' 获取token"}
+            return {"authenticated": False, "message": "JWT token not found", "suggestion": "Run 'uv run refresh_jwt.py' to get token"}
         is_expired = is_token_expired(jwt_token)
-        result = {"authenticated": not is_expired, "token_present": True, "token_expired": is_expired, "token_preview": f"{jwt_token[:20]}...{jwt_token[-10:]}", "message": "Token有效" if not is_expired else "Token已过期"}
+        result = {"authenticated": not is_expired, "token_present": True, "token_expired": is_expired, "token_preview": f"{jwt_token[:20]}...{jwt_token[-10:]}", "message": "Token valid" if not is_expired else "Token expired"}
         if is_expired:
-            result["suggestion"] = "运行 'uv run refresh_jwt.py' 刷新token"
+            result["suggestion"] = "Run 'uv run refresh_jwt.py' to refresh token"
         return result
     except Exception as e:
-        logger.error(f"❌ 获取认证状态失败: {e}")
-        raise HTTPException(500, f"获取认证状态失败: {e}")
+        logger.error(f"❌ Failed to get authentication status: {e}")
+        raise HTTPException(500, f"Failed to get authentication status: {e}")
 
 
 @app.post("/api/auth/refresh")
@@ -343,12 +343,12 @@ async def refresh_auth_token():
     try:
         success = await refresh_jwt_if_needed()
         if success:
-            return {"success": True, "message": "JWT token刷新成功", "timestamp": datetime.now().isoformat()}
+            return {"success": True, "message": "JWT token refresh successful", "timestamp": datetime.now().isoformat()}
         else:
-            return {"success": False, "message": "JWT token刷新失败", "suggestion": "检查网络连接或手动运行 'uv run refresh_jwt.py'"}
+            return {"success": False, "message": "JWT token refresh failed", "suggestion": "Check network connection or manually run 'uv run refresh_jwt.py'"}
     except Exception as e:
-        logger.error(f"❌ 刷新JWT token失败: {e}")
-        raise HTTPException(500, f"刷新token失败: {e}")
+        logger.error(f"❌ JWT token refresh failed: {e}")
+        raise HTTPException(500, f"Token refresh failed: {e}")
 
 
 @app.get("/api/auth/user_id")
@@ -357,12 +357,12 @@ async def get_user_id_endpoint():
         from ..core.auth import get_user_id
         user_id = get_user_id()
         if user_id:
-            return {"success": True, "user_id": user_id, "message": "User ID获取成功"}
+            return {"success": True, "user_id": user_id, "message": "User ID retrieved successfully"}
         else:
-            return {"success": False, "user_id": "", "message": "未找到User ID，可能需要刷新JWT token"}
+            return {"success": False, "user_id": "", "message": "User ID not found, may need to refresh JWT token"}
     except Exception as e:
-        logger.error(f"❌ 获取User ID失败: {e}")
-        raise HTTPException(500, f"获取User ID失败: {e}")
+        logger.error(f"❌ Failed to get User ID: {e}")
+        raise HTTPException(500, f"Failed to get User ID: {e}")
 
 
 @app.get("/api/packets/history")
@@ -371,8 +371,8 @@ async def get_packet_history(limit: int = 50):
         history = manager.packet_history[-limit:] if len(manager.packet_history) > limit else manager.packet_history
         return {"packets": history, "total_count": len(manager.packet_history), "returned_count": len(history)}
     except Exception as e:
-        logger.error(f"❌ 获取数据包历史失败: {e}")
-        raise HTTPException(500, f"获取历史记录失败: {e}")
+        logger.error(f"❌ Failed to get packet history: {e}")
+        raise HTTPException(500, f"Failed to get history: {e}")
 
 
 @app.post("/api/warp/send")
@@ -381,32 +381,32 @@ async def send_to_warp_api(
     show_all_events: bool = Query(True, description="Show detailed SSE event breakdown")
 ):
     try:
-        logger.info(f"收到Warp API发送请求，消息类型: {request.message_type}")
+        logger.info(f"Received Warp API send request, message type: {request.message_type}")
         actual_data = request.get_data()
         if not actual_data:
-            raise HTTPException(400, "数据包不能为空")
+            raise HTTPException(400, "Data packet cannot be empty")
         wrapped = {"json_data": actual_data}
         wrapped = sanitize_mcp_input_schema_in_packet(wrapped)
         actual_data = wrapped.get("json_data", actual_data)
         actual_data = _encode_smd_inplace(actual_data)
         protobuf_bytes = dict_to_protobuf_bytes(actual_data, request.message_type)
-        logger.info(f"✅ JSON编码为protobuf成功: {len(protobuf_bytes)} 字节")
+        logger.info(f"✅ JSON encoded to protobuf successfully: {len(protobuf_bytes)} bytes")
         from ..warp.api_client import send_protobuf_to_warp_api
         response_text, conversation_id, task_id = await send_protobuf_to_warp_api(protobuf_bytes, show_all_events=show_all_events)
         await manager.log_packet("warp_request", actual_data, len(protobuf_bytes))
         await manager.log_packet("warp_response", {"response": response_text, "conversation_id": conversation_id, "task_id": task_id}, len(response_text.encode()))
         result = {"response": response_text, "conversation_id": conversation_id, "task_id": task_id, "request_size": len(protobuf_bytes), "response_size": len(response_text), "message_type": request.message_type}
-        logger.info(f"✅ Warp API调用成功，响应长度: {len(response_text)} 字符")
+        logger.info(f"✅ Warp API call successful, response length: {len(response_text)} characters")
         return result
     except Exception as e:
         import traceback
         error_details = {"error": str(e), "error_type": type(e).__name__, "traceback": traceback.format_exc(), "request_info": {"message_type": request.message_type, "json_size": len(str(actual_data)), "has_tools": "mcp_context" in actual_data, "has_history": "task_context" in actual_data}}
-        logger.error(f"❌ Warp API调用失败: {e}")
-        logger.error(f"错误详情: {error_details}")
+        logger.error(f"❌ Warp API call failed: {e}")
+        logger.error(f"Error details: {error_details}")
         try:
             await manager.log_packet("warp_error", error_details, 0)
         except Exception as log_error:
-            logger.warning(f"记录错误失败: {log_error}")
+            logger.warning(f"Failed to record error: {log_error}")
         raise HTTPException(500, detail=error_details)
 
 
@@ -415,16 +415,16 @@ async def send_to_warp_api_parsed(
     request: EncodeRequest
 ):
     try:
-        logger.info(f"收到Warp API解析发送请求，消息类型: {request.message_type}")
+        logger.info(f"Received Warp API parse send request, message type: {request.message_type}")
         actual_data = request.get_data()
         if not actual_data:
-            raise HTTPException(400, "数据包不能为空")
+            raise HTTPException(400, "Data packet cannot be empty")
         wrapped = {"json_data": actual_data}
         wrapped = sanitize_mcp_input_schema_in_packet(wrapped)
         actual_data = wrapped.get("json_data", actual_data)
         actual_data = _encode_smd_inplace(actual_data)
         protobuf_bytes = dict_to_protobuf_bytes(actual_data, request.message_type)
-        logger.info(f"✅ JSON编码为protobuf成功: {len(protobuf_bytes)} 字节")
+        logger.info(f"✅ JSON encoded to protobuf successfully: {len(protobuf_bytes)} bytes")
         from ..warp.api_client import send_protobuf_to_warp_api_parsed
         response_text, conversation_id, task_id, parsed_events = await send_protobuf_to_warp_api_parsed(protobuf_bytes)
         parsed_events = _decode_smd_inplace(parsed_events)
@@ -438,17 +438,17 @@ async def send_to_warp_api_parsed(
                 event_type = event.get("event_type", "UNKNOWN")
                 event_type_counts[event_type] = event_type_counts.get(event_type, 0) + 1
             result["events_summary"] = event_type_counts
-        logger.info(f"✅ Warp API解析调用成功，响应长度: {len(response_text)} 字符，事件数量: {len(parsed_events)}")
+        logger.info(f"✅ Warp API parse call successful, response length: {len(response_text)} characters, event count: {len(parsed_events)}")
         return result
     except Exception as e:
         import traceback
         error_details = {"error": str(e), "error_type": type(e).__name__, "traceback": traceback.format_exc(), "request_info": {"message_type": request.message_type, "json_size": len(str(actual_data)) if 'actual_data' in locals() else 0, "has_tools": "mcp_context" in (actual_data or {}), "has_history": "task_context" in (actual_data or {})}}
-        logger.error(f"❌ Warp API解析调用失败: {e}")
-        logger.error(f"错误详情: {error_details}")
+        logger.error(f"❌ Warp API parse call failed: {e}")
+        logger.error(f"Error details: {error_details}")
         try:
             await manager.log_packet("warp_error_parsed", error_details, 0)
         except Exception as log_error:
-            logger.warning(f"记录错误失败: {log_error}")
+            logger.warning(f"Failed to record error: {log_error}")
         raise HTTPException(500, detail=error_details)
 
 
@@ -460,7 +460,7 @@ async def send_to_warp_api_stream_sse(request: EncodeRequest):
     try:
         actual_data = request.get_data()
         if not actual_data:
-            raise HTTPException(400, "数据包不能为空")
+            raise HTTPException(400, "Data packet cannot be empty")
         wrapped = {"json_data": actual_data}
         wrapped = sanitize_mcp_input_schema_in_packet(wrapped)
         actual_data = wrapped.get("json_data", actual_data)
@@ -492,7 +492,7 @@ async def send_to_warp_api_stream_sse(request: EncodeRequest):
                 verify_opt = False
                 logger.warning("TLS verification disabled via WARP_INSECURE_TLS for Warp API stream endpoint")
             async with httpx.AsyncClient(http2=True, timeout=httpx.Timeout(60.0), verify=verify_opt, trust_env=True) as client:
-                # 最多尝试两次：第一次失败且为配额429时申请匿名token并重试一次
+                # Try at most twice: if first attempt fails with quota 429, apply for anonymous token and retry once
                 jwt = None
                 for attempt in range(2):
                     if attempt == 0 or jwt is None:
@@ -511,26 +511,26 @@ async def send_to_warp_api_stream_sse(request: EncodeRequest):
                         if response.status_code != 200:
                             error_text = await response.aread()
                             error_content = error_text.decode("utf-8") if error_text else ""
-                            # 429 且包含配额信息时，申请匿名token后重试一次
+                            # When 429 with quota info, apply for anonymous token and retry once
                             if response.status_code == 429 and attempt == 0 and (
                                 ("No remaining quota" in error_content) or ("No AI requests remaining" in error_content)
                             ):
-                                logger.warning("Warp API 返回 429 (配额用尽, SSE 代理)。尝试申请匿名token并重试一次…")
+                                logger.warning("Warp API returned 429 (quota exhausted, SSE proxy). Attempting to apply for anonymous token and retry once...")
                                 try:
                                     new_jwt = await acquire_anonymous_access_token()
                                 except Exception:
                                     new_jwt = None
                                 if new_jwt:
                                     jwt = new_jwt
-                                    # 重试
+                                    # Retry
                                     continue
                             logger.error(f"Warp API HTTP error {response.status_code}: {error_content[:300]}")
                             yield f"data: {{\"error\": \"HTTP {response.status_code}\"}}\n\n"
                             yield "data: [DONE]\n\n"
                             return
                         try:
-                            logger.info(f"✅ Warp API SSE连接已建立: {warp_url}")
-                            logger.info(f"📦 请求字节数: {len(protobuf_bytes)}")
+                            logger.info(f"✅ Warp API SSE connection established: {warp_url}")
+                            logger.info(f"📦 Request bytes: {len(protobuf_bytes)}")
                         except Exception:
                             pass
                         current_data = ""
@@ -582,7 +582,7 @@ async def send_to_warp_api_stream_sse(request: EncodeRequest):
                                 yield f"data: {chunk}\n\n"
                         try:
                             logger.info("="*60)
-                            logger.info("📊 SSE STREAM SUMMARY (代理)")
+                            logger.info("📊 SSE STREAM SUMMARY (proxy)")
                             logger.info("="*60)
                             logger.info(f"📈 Total Events Forwarded: {event_no}")
                             logger.info("="*60)
@@ -596,7 +596,7 @@ async def send_to_warp_api_stream_sse(request: EncodeRequest):
     except Exception as e:
         import traceback
         error_details = {"error": str(e), "error_type": type(e).__name__, "traceback": traceback.format_exc()}
-        logger.error(f"Warp SSE转发端点错误: {e}")
+        logger.error(f"Warp SSE forwarding endpoint error: {e}")
         raise HTTPException(500, detail=error_details)
 
 
@@ -604,20 +604,20 @@ async def send_to_warp_api_stream_sse(request: EncodeRequest):
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
-        await websocket.send_json({"event": "connected", "message": "WebSocket连接已建立", "timestamp": datetime.now().isoformat()})
+        await websocket.send_json({"event": "connected", "message": "WebSocket connection established", "timestamp": datetime.now().isoformat()})
         recent_packets = manager.packet_history[-10:]
         for packet in recent_packets:
             await websocket.send_json({"event": "packet_history", "packet": packet})
         while True:
             data = await websocket.receive_text()
-            logger.debug(f"收到WebSocket消息: {data}")
+            logger.debug(f"Received WebSocket message: {data}")
     except WebSocketDisconnect:
         manager.disconnect(websocket)
     except Exception as e:
-        logger.error(f"WebSocket错误: {e}")
+        logger.error(f"WebSocket error: {e}")
         manager.disconnect(websocket)
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=28888) 
+    uvicorn.run(app, host="0.0.0.0", port=8000) 
