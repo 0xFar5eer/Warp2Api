@@ -66,22 +66,16 @@ async def main():
     
 
 if __name__ == "__main__":
-    import multiprocessing
-    
-    # Calculate optimal worker count (2-4 workers per CPU core for I/O bound tasks)
-    cpu_count = multiprocessing.cpu_count()
-    # Use 4 workers minimum, or 2 per CPU core up to 8 workers max
-    worker_count = min(max(4, cpu_count * 2), 8)
-    
     asyncio.run(main())
+    # Single worker configuration optimized for 100 concurrent connections
     uvicorn.run(
         openai_server,
         host=os.getenv("HOST", "0.0.0.0"),
         port=int(os.getenv("PORT", "8010")),
         log_level="info",
-        workers=int(os.getenv("WORKERS", worker_count)),  # Multiple workers for concurrency
+        # No workers parameter - defaults to 1 worker
         loop="uvloop",  # Use uvloop for better async performance
-        limit_concurrency=100,  # Allow up to 100 concurrent connections per worker
+        limit_concurrency=100,  # Allow up to 100 concurrent connections
         limit_max_requests=None,  # No limit on total requests
         timeout_keep_alive=5,  # Keep-alive timeout
         access_log=True,
