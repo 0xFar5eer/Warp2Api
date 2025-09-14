@@ -13,7 +13,16 @@ Copy the example environment file and configure your settings:
 cp .env.example .env
 ```
 
-Edit the `.env` file and configure your proxy settings if you're using a rotating IP proxy service:
+Edit the `.env` file and configure:
+
+#### API Key Protection (Optional)
+- **API_KEY**: Set this to enable API key authentication for all endpoints
+  - If set: Only requests with matching API key are allowed
+  - If not set: All requests are allowed (backward compatible)
+  - Default: `super_secure_key` (change this in production!)
+  - Can be provided via `X-API-Key` header or `api_key` query parameter
+
+#### Proxy Settings (Optional)
 - The proxy credentials are used internally by the Docker container
 - These settings enable IP rotation for each request
 - Your proxy configuration remains private and is never exposed
@@ -35,7 +44,9 @@ In VSCode with the Kilocode extension:
 2. Choose "OpenAI Compatible" mode
 3. Configure:
    - **Base URL**: `http://localhost:4010/v1`
-   - **API Key**: `dummy` (any value works - not validated)
+   - **API Key**:
+     - If `API_KEY` is set in `.env`: Use that exact key
+     - If `API_KEY` is not set: Use any value (e.g., `dummy`)
    - **Model**: Choose `claude-4.1-opus` or any available model
 
 ### 4. **Verify the Service**
@@ -185,8 +196,9 @@ for chunk in response:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `WARP_JWT` | Warp authentication JWT token | Required |
-| `WARP_REFRESH_TOKEN` | JWT refresh token | Required |
+| `API_KEY` | API key for endpoint protection (optional) | `super_secure_key` |
+| `WARP_JWT` | Warp authentication JWT token | Auto-generated |
+| `WARP_REFRESH_TOKEN` | JWT refresh token | Auto-generated |
 | `HOST` | Server host address | `127.0.0.1` |
 | `PORT` | OpenAI API server port | `8010` |
 | `BRIDGE_BASE_URL` | Protobuf bridge server URL | `http://localhost:8000` |
@@ -205,7 +217,39 @@ warp-test
 
 ## 🔐 Authentication
 
-The service automatically handles Warp authentication:
+The service has two levels of authentication:
+
+### API Key Protection (Your Service)
+Controls access to your Warp2Api instance:
+
+- **When `API_KEY` is set**: Only requests with matching API key are allowed
+- **When `API_KEY` is not set**: All requests are allowed (backward compatible)
+- **Default value**: `super_secure_key` (⚠️ Change this in production!)
+
+#### How to provide API key in requests:
+
+**Option 1: Header (Recommended)**
+```bash
+curl -H "X-API-Key: super_secure_key" http://localhost:8010/v1/chat/completions
+```
+
+**Option 2: Query Parameter**
+```bash
+curl "http://localhost:8010/v1/chat/completions?api_key=super_secure_key"
+```
+
+**Option 3: OpenAI Client**
+```python
+import openai
+
+client = openai.OpenAI(
+    base_url="http://localhost:8010/v1",
+    api_key="super_secure_key"  # Must match API_KEY in .env
+)
+```
+
+### Warp Authentication (Upstream Service)
+Automatically handled by the service:
 
 1. **JWT Management**: Automatic token validation and refresh
 2. **Anonymous Access**: Falls back to anonymous tokens when needed

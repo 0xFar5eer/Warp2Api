@@ -5,10 +5,12 @@ import json
 import time
 import uuid
 from typing import Any, Dict, List, Optional
+import os
 
 import requests
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
+from fastapi.security import APIKeyHeader, APIKeyQuery
 
 from .logging import logger
 
@@ -23,6 +25,54 @@ from .sse_transform import stream_openai_sse
 
 
 router = APIRouter()
+
+# API Key validation setup
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+api_key_query = APIKeyQuery(name="api_key", auto_error=False)
+
+
+def get_required_api_key() -> Optional[str]:
+    """
+    Get the required API key from environment.
+    Reads dynamically to support runtime changes.
+    Treats empty string as None (no API key required).
+    """
+    api_key = os.getenv("API_KEY")
+    return api_key if api_key else None
+
+
+async def get_api_key(
+    api_key_from_header: Optional[str] = Depends(api_key_header),
+    api_key_from_query: Optional[str] = Depends(api_key_query),
+) -> Optional[str]:
+    """Validate API key from header or query parameter."""
+    # Get required API key dynamically
+    required_api_key = get_required_api_key()
+    
+    # If no API key is configured, allow all requests
+    if not required_api_key:
+        return None
+    
+    # Get the provided API key from either source
+    provided_key = api_key_from_header or api_key_from_query
+    
+    # Check if API key was provided
+    if not provided_key:
+        logger.warning("API key required but not provided in request")
+        raise HTTPException(
+            status_code=401,
+            detail="API key required. Please provide via X-API-Key header or api_key query parameter",
+        )
+    
+    # Validate the API key
+    if provided_key != required_api_key:
+        logger.warning(f"Invalid API key provided: {provided_key[:8]}...")
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid API key",
+        )
+    
+    return provided_key
 
 
 @router.get("/")
@@ -55,7 +105,10 @@ def list_models():
 
 
 @router.post("/v1/chat/completions")
-async def chat_completions(req: ChatCompletionsRequest):
+async def chat_completions(
+    req: ChatCompletionsRequest,
+    api_key: Optional[str] = Depends(get_api_key)
+):
     try:
         initialize_once()
     except Exception as e:

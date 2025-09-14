@@ -22,6 +22,8 @@ services:
       - HTTP_PROXY=${HTTP_PROXY:-http://${PROXY_USER}:${PROXY_PASS}@${PROXY_HOST}:${PROXY_PORT}}
       # Ensure localhost connections never use proxy
       - NO_PROXY=localhost,127.0.0.1,0.0.0.0,host.docker.internal,::1
+      # API Key protection (if not set or empty, no authentication required)
+      - API_KEY=${API_KEY:-}
       # Optional: JWT tokens from .env file
       - WARP_JWT=${WARP_JWT:-}
       - WARP_REFRESH_TOKEN=${WARP_REFRESH_TOKEN:-}
@@ -33,22 +35,17 @@ services:
     volumes:
       # Optional: Mount logs directory
       - ./logs:/app/logs
-    restart: unless-stopped
+    restart: always
     healthcheck:
       test:
         [
-          "CMD",
-          "curl",
-          "-f",
-          "http://localhost:8010/healthz",
-          "||",
-          "exit",
-          "1",
+          "CMD-SHELL",
+          "curl -f http://localhost:8000/healthz && curl -f http://localhost:8010/healthz || exit 1",
         ]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 40s
+      retries: 5
+      start_period: 60s
 
 networks:
   default:

@@ -12,7 +12,7 @@ import httpx
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 
-from fastapi import FastAPI, Request, HTTPException, WebSocket, WebSocketDisconnect, Query
+from fastapi import FastAPI, Request, HTTPException, WebSocket, WebSocketDisconnect, Query, Depends
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -21,6 +21,7 @@ from ..core.logging import logger
 from ..core.protobuf_utils import protobuf_to_dict, dict_to_protobuf_bytes
 from ..core.auth import get_jwt_token, refresh_jwt_if_needed, is_token_expired, get_valid_jwt, acquire_anonymous_access_token
 from ..core.stream_processor import get_stream_processor, set_websocket_manager
+from ..core.api_key_validation import get_api_key
 from ..config.models import get_all_unique_models
 from ..config.settings import CLIENT_VERSION, OS_CATEGORY, OS_NAME, OS_VERSION, WARP_URL as CONFIG_WARP_URL
 from ..core.server_message_data import decode_server_message_data, encode_server_message_data
@@ -209,7 +210,10 @@ async def health_check():
 
 
 @app.post("/api/encode")
-async def encode_json_to_protobuf(request: EncodeRequest):
+async def encode_json_to_protobuf(
+    request: EncodeRequest,
+    api_key: Optional[str] = Depends(get_api_key)
+):
     try:
         logger.info(f"Received encoding request, message type: {request.message_type}")
         actual_data = request.get_data()
@@ -239,7 +243,10 @@ async def encode_json_to_protobuf(request: EncodeRequest):
 
 
 @app.post("/api/decode")
-async def decode_protobuf_to_json(request: DecodeRequest):
+async def decode_protobuf_to_json(
+    request: DecodeRequest,
+    api_key: Optional[str] = Depends(get_api_key)
+):
     try:
         logger.info(f"Received decoding request, message type: {request.message_type}")
         if not request.protobuf_bytes or not request.protobuf_bytes.strip():
@@ -267,7 +274,10 @@ async def decode_protobuf_to_json(request: DecodeRequest):
 
 
 @app.post("/api/stream-decode")
-async def decode_stream_protobuf(request: StreamDecodeRequest):
+async def decode_stream_protobuf(
+    request: StreamDecodeRequest,
+    api_key: Optional[str] = Depends(get_api_key)
+):
     try:
         logger.info(f"Received streaming decode request, chunk count: {len(request.protobuf_chunks)}")
         results = []
@@ -339,7 +349,7 @@ async def get_auth_status():
 
 
 @app.post("/api/auth/refresh")
-async def refresh_auth_token():
+async def refresh_auth_token(api_key: Optional[str] = Depends(get_api_key)):
     try:
         success = await refresh_jwt_if_needed()
         if success:
@@ -377,8 +387,9 @@ async def get_packet_history(limit: int = 50):
 
 @app.post("/api/warp/send")
 async def send_to_warp_api(
-    request: EncodeRequest, 
-    show_all_events: bool = Query(True, description="Show detailed SSE event breakdown")
+    request: EncodeRequest,
+    show_all_events: bool = Query(True, description="Show detailed SSE event breakdown"),
+    api_key: Optional[str] = Depends(get_api_key)
 ):
     try:
         logger.info(f"Received Warp API send request, message type: {request.message_type}")
@@ -412,7 +423,8 @@ async def send_to_warp_api(
 
 @app.post("/api/warp/send_stream")
 async def send_to_warp_api_parsed(
-    request: EncodeRequest
+    request: EncodeRequest,
+    api_key: Optional[str] = Depends(get_api_key)
 ):
     try:
         logger.info(f"Received Warp API parse send request, message type: {request.message_type}")
@@ -453,7 +465,10 @@ async def send_to_warp_api_parsed(
 
 
 @app.post("/api/warp/send_stream_sse")
-async def send_to_warp_api_stream_sse(request: EncodeRequest):
+async def send_to_warp_api_stream_sse(
+    request: EncodeRequest,
+    api_key: Optional[str] = Depends(get_api_key)
+):
     from fastapi.responses import StreamingResponse
     import os as _os
     import re as _re
