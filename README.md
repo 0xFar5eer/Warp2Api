@@ -2,11 +2,50 @@
 
 A Python-based bridge service that provides OpenAI Chat Completions API compatibility for Warp AI services, enabling seamless integration with OpenAI-compatible applications by leveraging Warp's protobuf infrastructure.
 
-## 🐳 Docker Compose Quick Start (Recommended)
+## 🚀 Quick Start (One-Command Setup)
 
-The easiest way to run Warp2Api is using Docker Compose:
+### For Unix/macOS:
+```bash
+./start.sh
+```
 
-### 1. **Configure Environment Variables**
+### For Windows:
+```cmd
+start.bat
+```
+
+These scripts will:
+- ✅ Check and install prerequisites (Docker, Docker Compose, curl)
+- ✅ Create `.env` file from template if missing
+- ✅ Force rebuild Docker image with latest code
+- ✅ Start all services
+- ✅ Wait for health checks
+- ✅ Display service URLs and API key configuration
+
+## 🐳 Docker Compose Setup (Manual)
+
+If you prefer manual setup or the scripts encounter issues:
+
+### 1. **Prerequisites**
+
+Ensure you have the following installed:
+
+#### Unix/macOS:
+- **Docker Desktop**: [Download](https://www.docker.com/products/docker-desktop) or `brew install --cask docker`
+- **curl**: Usually pre-installed, or `brew install curl`
+
+#### Windows:
+- **Docker Desktop**: [Download](https://www.docker.com/products/docker-desktop) or `choco install docker-desktop`
+- **curl**: Usually included in Windows 10/11, or `choco install curl`
+
+#### Linux:
+- **Docker**:
+  - Ubuntu/Debian: `sudo apt-get install docker.io docker-compose`
+  - Fedora/RHEL: `sudo dnf install docker docker-compose`
+  - Arch: `sudo pacman -S docker docker-compose`
+- **curl**: `sudo apt-get install curl` (Ubuntu/Debian)
+
+### 2. **Configure Environment Variables**
 
 Copy the example environment file and configure your settings:
 ```bash
@@ -17,9 +56,8 @@ Edit the `.env` file and configure:
 
 #### API Key Protection (Optional)
 - **API_KEY**: Set this to enable API key authentication for all endpoints
-  - If set: Only requests with matching API key are allowed
-  - If not set: All requests are allowed (backward compatible)
-  - Default: `super_secure_key` (change this in production!)
+  - If set to empty string: No authentication required
+  - If set to a value: Only requests with matching API key are allowed
   - Can be provided via `X-API-Key` header or `api_key` query parameter
 
 #### Proxy Settings (Optional)
@@ -27,10 +65,18 @@ Edit the `.env` file and configure:
 - These settings enable IP rotation for each request
 - Your proxy configuration remains private and is never exposed
 
-### 2. **Start the Service**
+### 3. **Build and Start Services**
 
+Force rebuild and start:
 ```bash
-docker compose up -d
+# Stop any running containers
+docker-compose down
+
+# Force rebuild without cache
+docker-compose build --no-cache
+
+# Start services
+docker-compose up -d
 ```
 
 This will start both servers:
