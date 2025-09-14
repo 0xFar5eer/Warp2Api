@@ -85,7 +85,14 @@ async def send_protobuf_to_warp_api(
 
         # Only use proxy for actual Warp API URLs, not for localhost
         use_proxy = not any(x in warp_url.lower() for x in ['localhost', '127.0.0.1', '0.0.0.0'])
-        async with httpx.AsyncClient(http2=True, timeout=httpx.Timeout(60.0), verify=verify_opt, trust_env=use_proxy) as client:
+        # Set timeout with longer read timeout for SSE streaming
+        # Connect timeout: 10s, Read timeout: 300s (5 minutes) for streaming
+        async with httpx.AsyncClient(
+            http2=True,
+            timeout=httpx.Timeout(connect=10.0, read=300.0, write=10.0, pool=10.0),
+            verify=verify_opt,
+            trust_env=use_proxy
+        ) as client:
             # Try at most twice: if first attempt fails with quota 429, acquire anonymous token and retry once
             for attempt in range(2):
                 jwt = await get_valid_jwt() if attempt == 0 else jwt  # keep existing unless refreshed explicitly
@@ -271,7 +278,14 @@ async def send_protobuf_to_warp_api_parsed(protobuf_bytes: bytes) -> tuple[str, 
 
         # Only use proxy for actual Warp API URLs, not for localhost
         use_proxy = not any(x in warp_url.lower() for x in ['localhost', '127.0.0.1', '0.0.0.0'])
-        async with httpx.AsyncClient(http2=True, timeout=httpx.Timeout(60.0), verify=verify_opt, trust_env=use_proxy) as client:
+        # Set timeout with longer read timeout for SSE streaming
+        # Connect timeout: 10s, Read timeout: 300s (5 minutes) for streaming
+        async with httpx.AsyncClient(
+            http2=True,
+            timeout=httpx.Timeout(connect=10.0, read=300.0, write=10.0, pool=10.0),
+            verify=verify_opt,
+            trust_env=use_proxy
+        ) as client:
             # Try at most twice: if first attempt fails with quota 429, acquire anonymous token and retry once
             for attempt in range(2):
                 jwt = await get_valid_jwt() if attempt == 0 else jwt  # keep existing unless refreshed explicitly

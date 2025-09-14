@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 import uuid
 from typing import Any, Dict, Optional
@@ -22,6 +23,12 @@ from .state import STATE, ensure_tool_ids
 
 def bridge_send_stream(packet: Dict[str, Any]) -> Dict[str, Any]:
     last_exc: Optional[Exception] = None
+    # Get API key from environment if set
+    api_key = os.getenv("API_KEY")
+    headers = {}
+    if api_key:
+        headers["X-API-Key"] = api_key
+    
     for base in FALLBACK_BRIDGE_URLS:
         url = f"{base}/api/warp/send_stream"
         try:
@@ -32,7 +39,7 @@ def bridge_send_stream(packet: Dict[str, Any]) -> Dict[str, Any]:
             except Exception:
                 logger.info("[OpenAI Compat] Bridge request payload serialization failed for URL %s", url)
             # Don't use proxy for localhost connections
-            r = requests.post(url, json=wrapped_packet, timeout=(5.0, 180.0), proxies={'http': None, 'https': None})
+            r = requests.post(url, json=wrapped_packet, headers=headers, timeout=(5.0, 180.0), proxies={'http': None, 'https': None})
             if r.status_code == 200:
                 try:
                     logger.info("[OpenAI Compat] Bridge response (raw text): %s", r.text)
@@ -61,6 +68,12 @@ def initialize_once() -> None:
 
     health_urls = [f"{base}/healthz" for base in FALLBACK_BRIDGE_URLS]
     last_err: Optional[str] = None
+    # Get API key from environment if set for health checks
+    api_key = os.getenv("API_KEY")
+    headers = {}
+    if api_key:
+        headers["X-API-Key"] = api_key
+    
     for _ in range(WARMUP_INIT_RETRIES):
         try:
             ok = False
@@ -68,7 +81,7 @@ def initialize_once() -> None:
             for h in health_urls:
                 try:
                     # Don't use proxy for localhost connections
-                    resp = requests.get(h, timeout=5.0, proxies={'http': None, 'https': None})
+                    resp = requests.get(h, headers=headers, timeout=5.0, proxies={'http': None, 'https': None})
                     if resp.status_code == 200:
                         ok = True
                         break

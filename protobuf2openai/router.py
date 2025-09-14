@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 import os
 
 import requests
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Header
 from fastapi.responses import StreamingResponse
 from fastapi.security import APIKeyHeader, APIKeyQuery
 
@@ -44,8 +44,9 @@ def get_required_api_key() -> Optional[str]:
 async def get_api_key(
     api_key_from_header: Optional[str] = Depends(api_key_header),
     api_key_from_query: Optional[str] = Depends(api_key_query),
+    authorization: Optional[str] = Header(None),
 ) -> Optional[str]:
-    """Validate API key from header or query parameter."""
+    """Validate API key from header, query parameter, or Bearer token."""
     # Get required API key dynamically
     required_api_key = get_required_api_key()
     
@@ -56,12 +57,19 @@ async def get_api_key(
     # Get the provided API key from either source
     provided_key = api_key_from_header or api_key_from_query
     
+    # Check Authorization header for Bearer token (OpenAI compatibility)
+    if not provided_key and authorization:
+        # Extract Bearer token from Authorization header
+        if authorization.startswith("Bearer "):
+            provided_key = authorization[7:]  # Remove "Bearer " prefix
+            logger.info(f"API key extracted from Bearer token: {provided_key[:8]}...")
+    
     # Check if API key was provided
     if not provided_key:
         logger.warning("API key required but not provided in request")
         raise HTTPException(
             status_code=401,
-            detail="API key required. Please provide via X-API-Key header or api_key query parameter",
+            detail="API key required. Please provide via X-API-Key header, Authorization: Bearer header, or api_key query parameter",
         )
     
     # Validate the API key
@@ -86,11 +94,17 @@ def health_check():
 
 
 @router.get("/v1/models")
-def list_models():
+def list_models(api_key: Optional[str] = Depends(get_api_key)):
     """OpenAI-compatible model listing. Forwards to bridge, with local fallback."""
+    # Get API key from environment for internal bridge requests
+    bridge_api_key = os.getenv("API_KEY")
+    headers = {}
+    if bridge_api_key:
+        headers["X-API-Key"] = bridge_api_key
+    
     try:
         # Don't use proxy for localhost connections
-        resp = requests.get(f"{BRIDGE_BASE_URL}/v1/models", timeout=10.0, proxies={'http': None, 'https': None})
+        resp = requests.get(f"{BRIDGE_BASE_URL}/v1/models", headers=headers, timeout=10.0, proxies={'http': None, 'https': None})
         if resp.status_code != 200:
             raise HTTPException(resp.status_code, f"bridge_error: {resp.text}")
         return resp.json()
@@ -198,10 +212,17 @@ async def chat_completions(
         return StreamingResponse(_agen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "Connection": "keep-alive"})
 
     def _post_once() -> requests.Response:
+        # Get API key from environment for internal bridge requests
+        bridge_api_key = os.getenv("API_KEY")
+        headers = {}
+        if bridge_api_key:
+            headers["X-API-Key"] = bridge_api_key
+        
         # Don't use proxy for localhost connections
         return requests.post(
             f"{BRIDGE_BASE_URL}/api/warp/send_stream",
             json={"json_data": packet, "message_type": "warp.multi_agent.v1.Request"},
+            headers=headers,
             timeout=(5.0, 180.0),
             proxies={'http': None, 'https': None}
         )
@@ -210,8 +231,13 @@ async def chat_completions(
         resp = _post_once()
         if resp.status_code == 429:
             try:
+                # Get API key from environment for internal bridge requests
+                bridge_api_key = os.getenv("API_KEY")
+                headers = {}
+                if bridge_api_key:
+                    headers["X-API-Key"] = bridge_api_key
                 # Don't use proxy for localhost connections
-                r = requests.post(f"{BRIDGE_BASE_URL}/api/auth/refresh", timeout=10.0, proxies={'http': None, 'https': None})
+                r = requests.post(f"{BRIDGE_BASE_URL}/api/auth/refresh", headers=headers, timeout=10.0, proxies={'http': None, 'https': None})
                 logger.warning("[OpenAI Compat] Bridge returned 429. Tried JWT refresh -> HTTP %s", getattr(r, 'status_code', 'N/A'))
             except Exception as _e:
                 logger.warning("[OpenAI Compat] JWT refresh attempt failed after 429: %s", _e)

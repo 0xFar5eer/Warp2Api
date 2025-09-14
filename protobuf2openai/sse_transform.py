@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from typing import Any, AsyncGenerator, Dict
 
@@ -28,13 +29,19 @@ async def stream_openai_sse(packet: Dict[str, Any], completion_id: str, created_
         yield f"data: {json.dumps(first, ensure_ascii=False)}\n\n"
 
         timeout = httpx.Timeout(60.0)
+        # Get API key from environment for internal bridge requests
+        api_key = os.getenv("API_KEY")
+        headers = {"accept": "text/event-stream"}
+        if api_key:
+            headers["X-API-Key"] = api_key
+        
         # Don't use proxy for localhost connections
         async with httpx.AsyncClient(http2=True, timeout=timeout, trust_env=False) as client:
             def _do_stream():
                 return client.stream(
                     "POST",
                     f"{BRIDGE_BASE_URL}/api/warp/send_stream_sse",
-                    headers={"accept": "text/event-stream"},
+                    headers=headers,
                     json={"json_data": packet, "message_type": "warp.multi_agent.v1.Request"},
                 )
 
@@ -43,7 +50,11 @@ async def stream_openai_sse(packet: Dict[str, Any], completion_id: str, created_
             async with response_cm as response:
                 if response.status_code == 429:
                     try:
-                        r = await client.post(f"{BRIDGE_BASE_URL}/api/auth/refresh", timeout=10.0)
+                        # Include API key in refresh request if available
+                        refresh_headers = {}
+                        if api_key:
+                            refresh_headers["X-API-Key"] = api_key
+                        r = await client.post(f"{BRIDGE_BASE_URL}/api/auth/refresh", headers=refresh_headers, timeout=10.0)
                         logger.warning("[OpenAI Compat] Bridge returned 429. Tried JWT refresh -> HTTP %s", r.status_code)
                     except Exception as _e:
                         logger.warning("[OpenAI Compat] JWT refresh attempt failed after 429: %s", _e)

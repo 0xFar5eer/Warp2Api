@@ -309,7 +309,7 @@ async def decode_stream_protobuf(
 
 
 @app.get("/api/schemas")
-async def get_protobuf_schemas():
+async def get_protobuf_schemas(api_key: Optional[str] = Depends(get_api_key)):
     try:
         from ..core.protobuf import ensure_proto_runtime, ALL_MSGS, msg_cls
         ensure_proto_runtime()
@@ -333,7 +333,7 @@ async def get_protobuf_schemas():
 
 
 @app.get("/api/auth/status")
-async def get_auth_status():
+async def get_auth_status(api_key: Optional[str] = Depends(get_api_key)):
     try:
         jwt_token = get_jwt_token()
         if not jwt_token:
@@ -362,7 +362,7 @@ async def refresh_auth_token(api_key: Optional[str] = Depends(get_api_key)):
 
 
 @app.get("/api/auth/user_id")
-async def get_user_id_endpoint():
+async def get_user_id_endpoint(api_key: Optional[str] = Depends(get_api_key)):
     try:
         from ..core.auth import get_user_id
         user_id = get_user_id()
@@ -376,7 +376,7 @@ async def get_user_id_endpoint():
 
 
 @app.get("/api/packets/history")
-async def get_packet_history(limit: int = 50):
+async def get_packet_history(limit: int = 50, api_key: Optional[str] = Depends(get_api_key)):
     try:
         history = manager.packet_history[-limit:] if len(manager.packet_history) > limit else manager.packet_history
         return {"packets": history, "total_count": len(manager.packet_history), "returned_count": len(history)}
@@ -506,7 +506,14 @@ async def send_to_warp_api_stream_sse(
             if insecure_env in ("1", "true", "yes"):
                 verify_opt = False
                 logger.warning("TLS verification disabled via WARP_INSECURE_TLS for Warp API stream endpoint")
-            async with httpx.AsyncClient(http2=True, timeout=httpx.Timeout(60.0), verify=verify_opt, trust_env=True) as client:
+            # Set timeout with longer read timeout for SSE streaming
+            # Connect timeout: 10s, Read timeout: 300s (5 minutes) for streaming
+            async with httpx.AsyncClient(
+                http2=True,
+                timeout=httpx.Timeout(connect=10.0, read=300.0, write=10.0, pool=10.0),
+                verify=verify_opt,
+                trust_env=True
+            ) as client:
                 # Try at most twice: if first attempt fails with quota 429, apply for anonymous token and retry once
                 jwt = None
                 for attempt in range(2):
