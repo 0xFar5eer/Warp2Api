@@ -461,7 +461,6 @@ def prewarm_dns_cache():
     common_hosts = [
         "api.openai.com",
         "api.anthropic.com",
-        "api.claude.ai",
         "generativelanguage.googleapis.com"
     ]
     

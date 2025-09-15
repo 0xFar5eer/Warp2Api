@@ -28,4 +28,26 @@ class ChatCompletionsRequest(BaseModel):
     messages: List[ChatMessage]
     stream: Optional[bool] = False
     tools: Optional[List[OpenAITool]] = None
-    tool_choice: Optional[Any] = None 
+    tool_choice: Optional[Any] = None
+
+
+# Embeddings models for KiloCode indexing support
+class EmbeddingsRequest(BaseModel):
+    input: Union[str, List[str]]  # Text(s) to embed
+    model: str = "claude-4.1-opus"  # Default to claude-4.1-opus
+    encoding_format: Optional[str] = "float"  # "float" or "base64"
+    dimensions: Optional[int] = 1536  # Output dimensionality
+    user: Optional[str] = None  # Optional user identifier
+
+
+class EmbeddingData(BaseModel):
+    object: str = "embedding"
+    embedding: List[float]  # The embedding vector
+    index: int  # Position in the input array
+
+
+class EmbeddingsResponse(BaseModel):
+    object: str = "list"
+    data: List[EmbeddingData]
+    model: str
+    usage: Dict[str, int]  # Token usage information

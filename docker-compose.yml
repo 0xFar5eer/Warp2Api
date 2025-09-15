@@ -5,6 +5,10 @@ services:
     build: .
     image: warp2api_proxy:latest
     container_name: warp2api_proxy
+    dns:
+      - 8.8.8.8 # Google Primary DNS
+      - 8.8.4.4 # Google Secondary DNS
+      - 127.0.0.1 # Local dnsmasq cache
     ports:
       - "4009:8000" # Protobuf encoding/decoding server port
       - "4010:8010" # OpenAI compatible API server port
