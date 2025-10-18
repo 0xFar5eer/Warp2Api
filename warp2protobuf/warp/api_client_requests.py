@@ -231,3 +231,122 @@ async def send_protobuf_to_warp_api_parsed(protobuf_bytes: bytes) -> tuple[str, 
     full_response, conversation_id, task_id = await send_protobuf_to_warp_api(protobuf_bytes, show_all_events=True)
     # For simplicity, return empty parsed_events list - can be enhanced later if needed
     return full_response, conversation_id, task_id, []
+
+
+async def send_protobuf_to_warp_api_stream(protobuf_bytes: bytes):
+    """Send protobuf data and yield SSE events as they arrive"""
+    def _sync_stream():
+        """Synchronous streaming request handler"""
+        import re
+        import json
+        
+        logger.info(f"Streaming {len(protobuf_bytes)} bytes to Warp API")
+        
+        warp_url = CONFIG_WARP_URL
+        logger.info(f"Streaming request to: {warp_url}")
+        logger.info("TLS verification disabled for intercept server")
+        
+        # Get JWT
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        jwt = loop.run_until_complete(get_valid_jwt())
+        loop.close()
+        
+        headers = {
+            "accept": "text/event-stream",
+            "content-type": "application/x-protobuf",
+            "x-warp-client-version": "v0.2025.09.24.08.11.stable_00",
+            "x-warp-os-category": "Windows",
+            "x-warp-os-name": "Windows",
+            "x-warp-os-version": "11 (26100)",
+            "authorization": f"Bearer {jwt}",
+        }
+        
+        response = requests.post(
+            warp_url,
+            headers=headers,
+            data=protobuf_bytes,
+            stream=True,
+            verify=False,
+            timeout=(10.0, 300.0)
+        )
+        
+        if response.status_code != 200:
+            error_content = response.text or "No error content"
+            logger.error(f"WARP API HTTP ERROR {response.status_code}: {error_content}")
+            yield {"error": f"HTTP {response.status_code}", "detail": error_content}
+            return
+        
+        logger.info(f"✅ Streaming response received (HTTP {response.status_code})")
+        
+        def _parse_payload_bytes(data_str: str):
+            s = re.sub(r"\s+", "", data_str or "")
+            if not s:
+                return None
+            if re.fullmatch(r"[0-9a-fA-F]+", s or ""):
+                try:
+                    return bytes.fromhex(s)
+                except Exception:
+                    pass
+            pad = "=" * ((4 - (len(s) % 4)) % 4)
+            try:
+                return base64.urlsafe_b64decode(s + pad)
+            except Exception:
+                try:
+                    return base64.b64decode(s + pad)
+                except Exception:
+                    return None
+        
+        current_data = ""
+        event_no = 0
+        
+        for line in response.iter_lines(decode_unicode=True):
+            if line.startswith("data:"):
+                payload = line[5:].strip()
+                if not payload:
+                    continue
+                if payload == "[DONE]":
+                    logger.info("Received [DONE] marker")
+                    break
+                current_data += payload
+                continue
+            
+            if (line.strip() == "") and current_data:
+                raw_bytes = _parse_payload_bytes(current_data)
+                current_data = ""
+                if raw_bytes is None:
+                    continue
+                try:
+                    event_data = protobuf_to_dict(raw_bytes, "warp.multi_agent.v1.ResponseEvent")
+                except Exception as e:
+                    logger.debug(f"Failed to parse event: {e}")
+                    continue
+                
+                event_no += 1
+                
+                # Determine event type
+                event_type = "UNKNOWN_EVENT"
+                if isinstance(event_data, dict):
+                    if "init" in event_data:
+                        event_type = "INITIALIZATION"
+                    elif "client_actions" in event_data or "clientActions" in event_data:
+                        client_actions = event_data.get("client_actions") or event_data.get("clientActions") or {}
+                        actions = client_actions.get("actions") or client_actions.get("Actions") or []
+                        event_type = f"CLIENT_ACTIONS({len(actions)})"
+                    elif "finished" in event_data:
+                        event_type = "FINISHED"
+                
+                logger.info(f"🔄 SSE Event #{event_no}: {event_type}")
+                
+                out = {
+                    "event_number": event_no,
+                    "event_type": event_type,
+                    "parsed_data": event_data
+                }
+                yield out
+        
+        logger.info(f"📊 Stream complete: {event_no} events forwarded")
+    
+    # Stream events asynchronously
+    for event in await asyncio.to_thread(lambda: list(_sync_stream())):
+        yield event

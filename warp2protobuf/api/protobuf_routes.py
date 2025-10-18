@@ -442,122 +442,22 @@ async def send_to_warp_api_stream_sse(
         actual_data = wrapped.get("json_data", actual_data)
         actual_data = _encode_smd_inplace(actual_data)
         protobuf_bytes = dict_to_protobuf_bytes(actual_data, request.message_type)
+        from ..warp.api_client_requests import send_protobuf_to_warp_api_stream
+        
         async def _agen():
-            warp_url = CONFIG_WARP_URL
-            def _parse_payload_bytes(data_str: str):
-                s = _re.sub(r"\s+", "", data_str or "")
-                if not s:
-                    return None
-                if _re.fullmatch(r"[0-9a-fA-F]+", s or ""):
-                    try:
-                        return bytes.fromhex(s)
-                    except Exception:
-                        pass
-                pad = "=" * ((4 - (len(s) % 4)) % 4)
-                try:
-                    import base64 as _b64
-                    return _b64.urlsafe_b64decode(s + pad)
-                except Exception:
-                    try:
-                        return _b64.b64decode(s + pad)
-                    except Exception:
-                        return None
-            verify_opt = True
-            insecure_env = _os.getenv("WARP_INSECURE_TLS", "").lower()
-            if insecure_env in ("1", "true", "yes"):
-                verify_opt = False
-                logger.warning("TLS verification disabled via WARP_INSECURE_TLS for Warp API stream endpoint")
-            # Disable SSL verification for app.warp.dev (intercept server)
-            verify_opt = False
-            # Set timeout with longer read timeout for SSE streaming
-            # Use HTTP/1.1 to support Transfer-Encoding: chunked for streaming
-            async with httpx.AsyncClient(
-                http2=False,
-                timeout=httpx.Timeout(connect=10.0, read=300.0, write=10.0, pool=10.0),
-                verify=verify_opt,
-                trust_env=False
-            ) as client:
-                # Single attempt - no retries (intercept server handles auth)
-                jwt = await get_valid_jwt()
-                headers = {
-                    "accept": "text/event-stream",
-                    "content-type": "application/x-protobuf",
-                    "x-warp-client-version": CLIENT_VERSION,
-                    "x-warp-os-category": OS_CATEGORY,
-                    "x-warp-os-name": OS_NAME,
-                    "x-warp-os-version": OS_VERSION,
-                    "authorization": f"Bearer {jwt}",
-                    "content-length": str(len(protobuf_bytes)),
-                }
-                async with client.stream("POST", warp_url, headers=headers, content=protobuf_bytes) as response:
-                    if response.status_code != 200:
-                        error_text = await response.aread()
-                        error_content = error_text.decode("utf-8") if error_text else ""
-                        logger.error(f"Warp API HTTP error {response.status_code}: {error_content[:300]}")
-                        yield f"data: {{\"error\": \"HTTP {response.status_code}\"}}\n\n"
-                        yield "data: [DONE]\n\n"
-                        return
-                    try:
-                        logger.info(f"✅ Warp API SSE connection established: {warp_url}")
-                        logger.info(f"📦 Request bytes: {len(protobuf_bytes)}")
-                    except Exception:
-                        pass
-                    current_data = ""
-                    event_no = 0
-                    async for line in response.aiter_lines():
-                        if line.startswith("data:"):
-                            payload = line[5:].strip()
-                            if not payload:
-                                continue
-                            if payload == "[DONE]":
-                                break
-                            current_data += payload
-                            continue
-                        if (line.strip() == "") and current_data:
-                            raw_bytes = _parse_payload_bytes(current_data)
-                            current_data = ""
-                            if raw_bytes is None:
-                                continue
-                            try:
-                                event_data = protobuf_to_dict(raw_bytes, "warp.multi_agent.v1.ResponseEvent")
-                            except Exception:
-                                continue
-                            def _get(d: Dict[str, Any], *names: str) -> Any:
-                                for n in names:
-                                    if isinstance(d, dict) and n in d:
-                                        return d[n]
-                                return None
-                            event_type = "UNKNOWN_EVENT"
-                            if isinstance(event_data, dict):
-                                if "init" in event_data:
-                                    event_type = "INITIALIZATION"
-                                else:
-                                    client_actions = _get(event_data, "client_actions", "clientActions")
-                                    if isinstance(client_actions, dict):
-                                        actions = _get(client_actions, "actions", "Actions") or []
-                                        event_type = f"CLIENT_ACTIONS({len(actions)})" if actions else "CLIENT_ACTIONS_EMPTY"
-                                    elif "finished" in event_data:
-                                        event_type = "FINISHED"
-                            event_no += 1
-                            try:
-                                logger.info(f"🔄 SSE Event #{event_no}: {event_type}")
-                            except Exception:
-                                pass
-                            out = {"event_number": event_no, "event_type": event_type, "parsed_data": event_data}
-                            try:
-                                chunk = json.dumps(out, ensure_ascii=False)
-                            except Exception:
-                                continue
-                            yield f"data: {chunk}\n\n"
-                    try:
-                        logger.info("="*60)
-                        logger.info("📊 SSE STREAM SUMMARY (proxy)")
-                        logger.info("="*60)
-                        logger.info(f"📈 Total Events Forwarded: {event_no}")
-                        logger.info("="*60)
-                    except Exception:
-                        pass
+            async for event in send_protobuf_to_warp_api_stream(protobuf_bytes):
+                if "error" in event:
+                    logger.error(f"Warp API error: {event}")
+                    yield f"data: {{\"error\": \"{event.get('error')}\"}}\n\n"
                     yield "data: [DONE]\n\n"
+                    return
+                try:
+                    chunk = json.dumps(event, ensure_ascii=False)
+                    yield f"data: {chunk}\n\n"
+                except Exception as e:
+                    logger.error(f"Failed to serialize event: {e}")
+                    continue
+            yield "data: [DONE]\n\n"
         return StreamingResponse(_agen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "Connection": "keep-alive"})
     except HTTPException:
         raise
