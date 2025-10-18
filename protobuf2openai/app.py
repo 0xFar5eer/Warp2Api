@@ -6,7 +6,7 @@ import json
 import httpx
 from fastapi import FastAPI
 
-from .logging import logger
+from .logger_config import logger
 
 from .config import BRIDGE_BASE_URL, WARMUP_INIT_RETRIES, WARMUP_INIT_DELAY_S
 from .bridge import initialize_once

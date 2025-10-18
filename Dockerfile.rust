@@ -1,0 +1,50 @@
+# Dockerfile.rust
+# syntax=docker/dockerfile:1.7-labs
+
+# 1) Plan dependency graph for caching
+FROM lukemathwalker/cargo-chef:latest-rust-1.81-alpine AS chef
+WORKDIR /app
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+# 2) Build dependencies using the recipe (cached across code changes)
+FROM lukemathwalker/cargo-chef:latest-rust-1.81-alpine AS deps
+WORKDIR /app
+COPY --from=chef /app/recipe.json recipe.json
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    cargo chef cook --recipe-path recipe.json
+
+# 3) Builder: compile debug or release binary
+FROM rust:1.81-alpine AS builder
+WORKDIR /app
+RUN apk add --no-cache musl-dev build-base pkgconfig
+COPY --from=deps /app/target target
+COPY --from=deps /usr/local/cargo /usr/local/cargo
+COPY . .
+ARG BIN
+ARG PROFILE=debug
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/app/target \
+    if [ "$PROFILE" = "release" ]; then \
+      cargo build --bin "$BIN" --release; \
+    else \
+      cargo build --bin "$BIN"; \
+    fi
+
+# 4a) Runtime (debug): includes netcat for TCP healthchecks
+FROM alpine:3.20 AS runtime-debug
+RUN apk add --no-cache ca-certificates netcat-openbsd
+WORKDIR /app/bin
+ARG BIN
+COPY --from=builder /app/target/debug/${BIN} /app/bin/${BIN}
+USER 65532:65532
+
+# 4b) Runtime (release): switch later
+FROM alpine:3.20 AS runtime-release
+RUN apk add --no-cache ca-certificates netcat-openbsd
+WORKDIR /app/bin
+ARG BIN
+COPY --from=builder /app/target/release/${BIN} /app/bin/${BIN}
+USER 65532:65532

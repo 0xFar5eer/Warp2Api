@@ -1,0 +1,28 @@
+{
+  "data": {
+    "user": {
+      "__typename": "UserOutput",
+      "user": {
+        "requestLimitInfo": {
+          "isUnlimited": false,
+          "nextRefreshTime": "2025-10-18T11:27:33.275081Z",
+          "requestLimit": 150,
+          "requestsUsedSinceLastRefresh": 0,
+          "requestLimitRefreshDuration": "MONTHLY",
+          "isUnlimitedAutosuggestions": false,
+          "acceptedAutosuggestionsLimit": 50,
+          "acceptedAutosuggestionsSinceLastRefresh": 0,
+          "isUnlimitedVoice": false,
+          "voiceRequestLimit": 10000,
+          "voiceRequestsUsedSinceLastRefresh": 0,
+          "voiceTokenLimit": 30000,
+          "voiceTokensUsedSinceLastRefresh": 0,
+          "isUnlimitedCodebaseIndices": false,
+          "maxCodebaseIndices": 3,
+          "maxFilesPerRepo": 5000,
+          "embeddingGenerationBatchSize": 100
+        }
+      }
+    }
+  }
+}

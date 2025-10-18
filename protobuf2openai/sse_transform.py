@@ -5,7 +5,7 @@ import os
 import uuid
 from typing import Any, AsyncGenerator, Dict
 
-from .logging import logger
+from .logger_config import logger
 from .http_client import OptimizedAsyncClient, get_async_client
 
 from .config import BRIDGE_BASE_URL

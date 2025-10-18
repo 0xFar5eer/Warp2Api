@@ -26,7 +26,6 @@ from warp2protobuf.core.logging import logger, set_log_file
 from warp2protobuf.api.protobuf_routes import EncodeRequest, _encode_smd_inplace
 from warp2protobuf.core.protobuf_utils import dict_to_protobuf_bytes
 from warp2protobuf.core.schema_sanitizer import sanitize_mcp_input_schema_in_packet
-from warp2protobuf.core.auth import acquire_anonymous_access_token
 from warp2protobuf.config.models import get_all_unique_models
 
 

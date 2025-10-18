@@ -26,7 +26,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from .logging import logger
+from .logger_config import logger
 
 
 # DNS Cache configuration
@@ -150,8 +150,13 @@ class OptimizedSyncClient:
             use_cache: Whether to use response caching for GET requests
             **kwargs: Additional request parameters
         """
-        # Apply DNS caching
+        # Disable SSL verification for app.warp.dev (warp intercept server)
         parsed = urlparse(url)
+        if parsed.hostname and 'app.warp.dev' in parsed.hostname:
+            kwargs["verify"] = False
+            logger.debug(f"SSL verification disabled for warp intercept server: {parsed.hostname}")
+        
+        # Apply DNS caching
         if parsed.hostname and not any(x in parsed.hostname for x in ['localhost', '127.0.0.1', '0.0.0.0']):
             try:
                 ip = DNSCachingResolver.resolve_host(parsed.hostname)
@@ -249,8 +254,9 @@ class OptimizedAsyncClient:
         )
         
         # Create client with optimized settings
+        # Use HTTP/1.1 to support Transfer-Encoding: chunked for streaming
         self.client = httpx.AsyncClient(
-            http2=True,
+            http2=False,
             timeout=self.timeout,
             limits=self.limits,
             headers={
@@ -286,8 +292,13 @@ class OptimizedAsyncClient:
             use_cache: Whether to use response caching for GET requests
             **kwargs: Additional request parameters
         """
-        # Apply DNS caching
+        # Disable SSL verification for app.warp.dev (warp intercept server)
         parsed = urlparse(url)
+        if parsed.hostname and 'app.warp.dev' in parsed.hostname:
+            # Note: httpx async client needs verify=False passed to client init, not request
+            logger.debug(f"SSL verification should be disabled for warp intercept server: {parsed.hostname}")
+        
+        # Apply DNS caching
         if parsed.hostname and not any(x in parsed.hostname for x in ['localhost', '127.0.0.1', '0.0.0.0']):
             try:
                 ip = await asyncio.get_event_loop().run_in_executor(
@@ -318,7 +329,7 @@ class OptimizedAsyncClient:
                 # Create a new client for localhost without proxy
                 if any(x in url.lower() for x in ['localhost', '127.0.0.1', '0.0.0.0']):
                     async with httpx.AsyncClient(
-                        http2=True,
+                        http2=False,
                         timeout=self.timeout,
                         limits=self.limits,
                         headers=self.client.headers,
@@ -369,7 +380,7 @@ class OptimizedAsyncClient:
         if any(x in url.lower() for x in ['localhost', '127.0.0.1', '0.0.0.0']):
             # Return a new client configured for localhost
             local_client = httpx.AsyncClient(
-                http2=True,
+                http2=False,
                 timeout=self.timeout,
                 limits=self.limits,
                 headers=self.client.headers,

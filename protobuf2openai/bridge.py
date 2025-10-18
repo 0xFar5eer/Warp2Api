@@ -6,7 +6,7 @@ import time
 import uuid
 from typing import Any, Dict, Optional
 
-from .logging import logger
+from .logger_config import logger
 from .http_client import OptimizedSyncClient, get_sync_client
 
 from .config import (
@@ -23,11 +23,7 @@ from .state import STATE, ensure_tool_ids
 
 def bridge_send_stream(packet: Dict[str, Any]) -> Dict[str, Any]:
     last_exc: Optional[Exception] = None
-    # Get API key from environment if set
-    api_key = os.getenv("API_KEY")
     headers = {}
-    if api_key:
-        headers["X-API-Key"] = api_key
     
     # Use optimized HTTP client
     client = get_sync_client()
@@ -73,11 +69,7 @@ def initialize_once() -> None:
 
     health_urls = [f"{base}/healthz" for base in FALLBACK_BRIDGE_URLS]
     last_err: Optional[str] = None
-    # Get API key from environment if set for health checks
-    api_key = os.getenv("API_KEY")
     headers = {}
-    if api_key:
-        headers["X-API-Key"] = api_key
     
     # Use optimized HTTP client
     client = get_sync_client()

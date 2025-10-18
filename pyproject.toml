@@ -1,23 +1,33 @@
-[project]
-name = "warptestui"
+[tool.poetry]
+name = "warp2api"
 version = "0.1.0"
-description = "Test UI for Warp"
+description = "OpenAI-compatible API for Warp AI with intercept server integration"
+authors = ["Your Name <your.email@example.com>"]
 readme = "README.md"
-requires-python = ">=3.13"
-dependencies = [
-    "fastapi[standard]",
-    "uvicorn[standard]",
-    "httpx[http2]",
-    "protobuf",
-    "grpcio-tools",
-    "python-dotenv",
-    "websockets>=15.0.1",
-    "requests>=2.32.5",
-    "openai>=1.106.0",
-    "numpy>=1.26.0",
-]
+packages = [{include = "warp2protobuf"}, {include = "protobuf2openai"}]
 
-[project.scripts]
+[tool.poetry.dependencies]
+python = "^3.13"
+fastapi = {extras = ["standard"], version = "^0.115.0"}
+uvicorn = {extras = ["standard"], version = "^0.34.0"}
+httpx = {extras = ["http2"], version = "^0.28.0"}
+protobuf = "^5.28.0"
+grpcio-tools = "^1.68.0"
+python-dotenv = "^1.0.0"
+websockets = "^15.0.1"
+requests = "^2.32.5"
+openai = "^1.106.0"
+numpy = "^1.26.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.0"
+pytest-asyncio = "^0.24.0"
+
+[tool.poetry.scripts]
 warp-server = "server:main"
-warp-test = "main:main"
+warp-test = "openai_compat:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
 

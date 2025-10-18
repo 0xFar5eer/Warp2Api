@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from ..core.logging import logger
 from ..core.protobuf_utils import protobuf_to_dict, dict_to_protobuf_bytes
-from ..core.auth import get_jwt_token, refresh_jwt_if_needed, is_token_expired, get_valid_jwt, acquire_anonymous_access_token
+from ..core.auth import get_jwt_token, get_valid_jwt
 from ..core.stream_processor import get_stream_processor, set_websocket_manager
 from ..core.api_key_validation import get_api_key
 from ..config.models import get_all_unique_models
@@ -332,47 +332,8 @@ async def get_protobuf_schemas(api_key: Optional[str] = Depends(get_api_key)):
         raise HTTPException(500, f"Failed to get schemas: {e}")
 
 
-@app.get("/api/auth/status")
-async def get_auth_status(api_key: Optional[str] = Depends(get_api_key)):
-    try:
-        jwt_token = get_jwt_token()
-        if not jwt_token:
-            return {"authenticated": False, "message": "JWT token not found", "suggestion": "Run 'uv run refresh_jwt.py' to get token"}
-        is_expired = is_token_expired(jwt_token)
-        result = {"authenticated": not is_expired, "token_present": True, "token_expired": is_expired, "token_preview": f"{jwt_token[:20]}...{jwt_token[-10:]}", "message": "Token valid" if not is_expired else "Token expired"}
-        if is_expired:
-            result["suggestion"] = "Run 'uv run refresh_jwt.py' to refresh token"
-        return result
-    except Exception as e:
-        logger.error(f"❌ Failed to get authentication status: {e}")
-        raise HTTPException(500, f"Failed to get authentication status: {e}")
-
-
-@app.post("/api/auth/refresh")
-async def refresh_auth_token(api_key: Optional[str] = Depends(get_api_key)):
-    try:
-        success = await refresh_jwt_if_needed()
-        if success:
-            return {"success": True, "message": "JWT token refresh successful", "timestamp": datetime.now().isoformat()}
-        else:
-            return {"success": False, "message": "JWT token refresh failed", "suggestion": "Check network connection or manually run 'uv run refresh_jwt.py'"}
-    except Exception as e:
-        logger.error(f"❌ JWT token refresh failed: {e}")
-        raise HTTPException(500, f"Token refresh failed: {e}")
-
-
-@app.get("/api/auth/user_id")
-async def get_user_id_endpoint(api_key: Optional[str] = Depends(get_api_key)):
-    try:
-        from ..core.auth import get_user_id
-        user_id = get_user_id()
-        if user_id:
-            return {"success": True, "user_id": user_id, "message": "User ID retrieved successfully"}
-        else:
-            return {"success": False, "user_id": "", "message": "User ID not found, may need to refresh JWT token"}
-    except Exception as e:
-        logger.error(f"❌ Failed to get User ID: {e}")
-        raise HTTPException(500, f"Failed to get User ID: {e}")
+# Auth endpoints removed - using dummy bearer token with intercept server
+# No token management needed as intercept server handles authentication
 
 
 @app.get("/api/packets/history")
@@ -402,7 +363,7 @@ async def send_to_warp_api(
         actual_data = _encode_smd_inplace(actual_data)
         protobuf_bytes = dict_to_protobuf_bytes(actual_data, request.message_type)
         logger.info(f"✅ JSON encoded to protobuf successfully: {len(protobuf_bytes)} bytes")
-        from ..warp.api_client import send_protobuf_to_warp_api
+        from ..warp.api_client_requests import send_protobuf_to_warp_api
         response_text, conversation_id, task_id = await send_protobuf_to_warp_api(protobuf_bytes, show_all_events=show_all_events)
         await manager.log_packet("warp_request", actual_data, len(protobuf_bytes))
         await manager.log_packet("warp_response", {"response": response_text, "conversation_id": conversation_id, "task_id": task_id}, len(response_text.encode()))
@@ -437,7 +398,7 @@ async def send_to_warp_api_parsed(
         actual_data = _encode_smd_inplace(actual_data)
         protobuf_bytes = dict_to_protobuf_bytes(actual_data, request.message_type)
         logger.info(f"✅ JSON encoded to protobuf successfully: {len(protobuf_bytes)} bytes")
-        from ..warp.api_client import send_protobuf_to_warp_api_parsed
+        from ..warp.api_client_requests import send_protobuf_to_warp_api_parsed
         response_text, conversation_id, task_id, parsed_events = await send_protobuf_to_warp_api_parsed(protobuf_bytes)
         parsed_events = _decode_smd_inplace(parsed_events)
         await manager.log_packet("warp_request_parsed", actual_data, len(protobuf_bytes))
@@ -506,112 +467,97 @@ async def send_to_warp_api_stream_sse(
             if insecure_env in ("1", "true", "yes"):
                 verify_opt = False
                 logger.warning("TLS verification disabled via WARP_INSECURE_TLS for Warp API stream endpoint")
+            # Disable SSL verification for app.warp.dev (intercept server)
+            verify_opt = False
             # Set timeout with longer read timeout for SSE streaming
-            # Connect timeout: 10s, Read timeout: 300s (5 minutes) for streaming
+            # Use HTTP/1.1 to support Transfer-Encoding: chunked for streaming
             async with httpx.AsyncClient(
-                http2=True,
+                http2=False,
                 timeout=httpx.Timeout(connect=10.0, read=300.0, write=10.0, pool=10.0),
                 verify=verify_opt,
-                trust_env=True
+                trust_env=False
             ) as client:
-                # Try at most twice: if first attempt fails with quota 429, apply for anonymous token and retry once
-                jwt = None
-                for attempt in range(2):
-                    if attempt == 0 or jwt is None:
-                        jwt = await get_valid_jwt()
-                    headers = {
-                        "accept": "text/event-stream",
-                        "content-type": "application/x-protobuf",
-                        "x-warp-client-version": CLIENT_VERSION,
-                        "x-warp-os-category": OS_CATEGORY,
-                        "x-warp-os-name": OS_NAME,
-                        "x-warp-os-version": OS_VERSION,
-                        "authorization": f"Bearer {jwt}",
-                        "content-length": str(len(protobuf_bytes)),
-                    }
-                    async with client.stream("POST", warp_url, headers=headers, content=protobuf_bytes) as response:
-                        if response.status_code != 200:
-                            error_text = await response.aread()
-                            error_content = error_text.decode("utf-8") if error_text else ""
-                            # When 429 with quota info, apply for anonymous token and retry once
-                            if response.status_code == 429 and attempt == 0 and (
-                                ("No remaining quota" in error_content) or ("No AI requests remaining" in error_content)
-                            ):
-                                logger.warning("Warp API returned 429 (quota exhausted, SSE proxy). Attempting to apply for anonymous token and retry once...")
-                                try:
-                                    new_jwt = await acquire_anonymous_access_token()
-                                except Exception:
-                                    new_jwt = None
-                                if new_jwt:
-                                    jwt = new_jwt
-                                    # Retry
-                                    continue
-                            logger.error(f"Warp API HTTP error {response.status_code}: {error_content[:300]}")
-                            yield f"data: {{\"error\": \"HTTP {response.status_code}\"}}\n\n"
-                            yield "data: [DONE]\n\n"
-                            return
-                        try:
-                            logger.info(f"✅ Warp API SSE connection established: {warp_url}")
-                            logger.info(f"📦 Request bytes: {len(protobuf_bytes)}")
-                        except Exception:
-                            pass
-                        current_data = ""
-                        event_no = 0
-                        async for line in response.aiter_lines():
-                            if line.startswith("data:"):
-                                payload = line[5:].strip()
-                                if not payload:
-                                    continue
-                                if payload == "[DONE]":
-                                    break
-                                current_data += payload
-                                continue
-                            if (line.strip() == "") and current_data:
-                                raw_bytes = _parse_payload_bytes(current_data)
-                                current_data = ""
-                                if raw_bytes is None:
-                                    continue
-                                try:
-                                    event_data = protobuf_to_dict(raw_bytes, "warp.multi_agent.v1.ResponseEvent")
-                                except Exception:
-                                    continue
-                                def _get(d: Dict[str, Any], *names: str) -> Any:
-                                    for n in names:
-                                        if isinstance(d, dict) and n in d:
-                                            return d[n]
-                                    return None
-                                event_type = "UNKNOWN_EVENT"
-                                if isinstance(event_data, dict):
-                                    if "init" in event_data:
-                                        event_type = "INITIALIZATION"
-                                    else:
-                                        client_actions = _get(event_data, "client_actions", "clientActions")
-                                        if isinstance(client_actions, dict):
-                                            actions = _get(client_actions, "actions", "Actions") or []
-                                            event_type = f"CLIENT_ACTIONS({len(actions)})" if actions else "CLIENT_ACTIONS_EMPTY"
-                                        elif "finished" in event_data:
-                                            event_type = "FINISHED"
-                                event_no += 1
-                                try:
-                                    logger.info(f"🔄 SSE Event #{event_no}: {event_type}")
-                                except Exception:
-                                    pass
-                                out = {"event_number": event_no, "event_type": event_type, "parsed_data": event_data}
-                                try:
-                                    chunk = json.dumps(out, ensure_ascii=False)
-                                except Exception:
-                                    continue
-                                yield f"data: {chunk}\n\n"
-                        try:
-                            logger.info("="*60)
-                            logger.info("📊 SSE STREAM SUMMARY (proxy)")
-                            logger.info("="*60)
-                            logger.info(f"📈 Total Events Forwarded: {event_no}")
-                            logger.info("="*60)
-                        except Exception:
-                            pass
+                # Single attempt - no retries (intercept server handles auth)
+                jwt = await get_valid_jwt()
+                headers = {
+                    "accept": "text/event-stream",
+                    "content-type": "application/x-protobuf",
+                    "x-warp-client-version": CLIENT_VERSION,
+                    "x-warp-os-category": OS_CATEGORY,
+                    "x-warp-os-name": OS_NAME,
+                    "x-warp-os-version": OS_VERSION,
+                    "authorization": f"Bearer {jwt}",
+                    "content-length": str(len(protobuf_bytes)),
+                }
+                async with client.stream("POST", warp_url, headers=headers, content=protobuf_bytes) as response:
+                    if response.status_code != 200:
+                        error_text = await response.aread()
+                        error_content = error_text.decode("utf-8") if error_text else ""
+                        logger.error(f"Warp API HTTP error {response.status_code}: {error_content[:300]}")
+                        yield f"data: {{\"error\": \"HTTP {response.status_code}\"}}\n\n"
                         yield "data: [DONE]\n\n"
                         return
+                    try:
+                        logger.info(f"✅ Warp API SSE connection established: {warp_url}")
+                        logger.info(f"📦 Request bytes: {len(protobuf_bytes)}")
+                    except Exception:
+                        pass
+                    current_data = ""
+                    event_no = 0
+                    async for line in response.aiter_lines():
+                        if line.startswith("data:"):
+                            payload = line[5:].strip()
+                            if not payload:
+                                continue
+                            if payload == "[DONE]":
+                                break
+                            current_data += payload
+                            continue
+                        if (line.strip() == "") and current_data:
+                            raw_bytes = _parse_payload_bytes(current_data)
+                            current_data = ""
+                            if raw_bytes is None:
+                                continue
+                            try:
+                                event_data = protobuf_to_dict(raw_bytes, "warp.multi_agent.v1.ResponseEvent")
+                            except Exception:
+                                continue
+                            def _get(d: Dict[str, Any], *names: str) -> Any:
+                                for n in names:
+                                    if isinstance(d, dict) and n in d:
+                                        return d[n]
+                                return None
+                            event_type = "UNKNOWN_EVENT"
+                            if isinstance(event_data, dict):
+                                if "init" in event_data:
+                                    event_type = "INITIALIZATION"
+                                else:
+                                    client_actions = _get(event_data, "client_actions", "clientActions")
+                                    if isinstance(client_actions, dict):
+                                        actions = _get(client_actions, "actions", "Actions") or []
+                                        event_type = f"CLIENT_ACTIONS({len(actions)})" if actions else "CLIENT_ACTIONS_EMPTY"
+                                    elif "finished" in event_data:
+                                        event_type = "FINISHED"
+                            event_no += 1
+                            try:
+                                logger.info(f"🔄 SSE Event #{event_no}: {event_type}")
+                            except Exception:
+                                pass
+                            out = {"event_number": event_no, "event_type": event_type, "parsed_data": event_data}
+                            try:
+                                chunk = json.dumps(out, ensure_ascii=False)
+                            except Exception:
+                                continue
+                            yield f"data: {chunk}\n\n"
+                    try:
+                        logger.info("="*60)
+                        logger.info("📊 SSE STREAM SUMMARY (proxy)")
+                        logger.info("="*60)
+                        logger.info(f"📈 Total Events Forwarded: {event_no}")
+                        logger.info("="*60)
+                    except Exception:
+                        pass
+                    yield "data: [DONE]\n\n"
         return StreamingResponse(_agen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "Connection": "keep-alive"})
     except HTTPException:
         raise

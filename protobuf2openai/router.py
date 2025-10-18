@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException, Depends, Header
 from fastapi.responses import StreamingResponse
 from fastapi.security import APIKeyHeader, APIKeyQuery
 
-from .logging import logger
+from .logger_config import logger
 from .http_client import OptimizedSyncClient, get_sync_client
 
 from .models import ChatCompletionsRequest, ChatMessage, EmbeddingsRequest, EmbeddingsResponse, EmbeddingData
@@ -96,11 +96,7 @@ def health_check():
 @router.get("/v1/models")
 def list_models(api_key: Optional[str] = Depends(get_api_key)):
     """OpenAI-compatible model listing. Forwards to bridge, with local fallback."""
-    # Get API key from environment for internal bridge requests
-    bridge_api_key = os.getenv("API_KEY")
     headers = {}
-    if bridge_api_key:
-        headers["X-API-Key"] = bridge_api_key
     
     # Use optimized HTTP client
     client = get_sync_client()

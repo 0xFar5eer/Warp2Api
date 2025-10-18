@@ -18,7 +18,8 @@ PROTO_DIR = SCRIPT_DIR / "proto"
 LOGS_DIR = SCRIPT_DIR / "logs"
 
 # API configuration
-WARP_URL = "https://app.warp.dev/ai/multi-agent"
+# WARP_URL can be overridden to point to intercept server
+WARP_URL = os.getenv("WARP_URL", "https://app.warp.dev/ai/multi-agent")
 
 # Environment variables with defaults
 HOST = os.getenv("HOST", "0.0.0.0")
@@ -26,7 +27,7 @@ PORT = int(os.getenv("PORT", "8002"))
 WARP_JWT = os.getenv("WARP_JWT")
 
 # Client headers configuration
-CLIENT_VERSION = "v0.2025.08.06.08.12.stable_02"
+CLIENT_VERSION = "v0.2025.09.24.08.11.stable_00"
 OS_CATEGORY = "Windows"
 OS_NAME = "Windows"
 OS_VERSION = "11 (26100)"

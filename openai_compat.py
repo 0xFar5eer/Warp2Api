@@ -14,7 +14,8 @@ import asyncio
 from protobuf2openai.app import app  # FastAPI app
 
 
-if __name__ == "__main__":
+def main():
+    """Entry point for warp-test command"""
     import uvicorn
     # Refresh JWT on startup before running the server
     try:
@@ -24,7 +25,11 @@ if __name__ == "__main__":
         pass
     uvicorn.run(
         app,
-        host=os.getenv("HOST", "127.0.0.1"),
+        host=os.getenv("HOST", "0.0.0.0"),
         port=int(os.getenv("PORT", "8010")),
         log_level="info",
     )
+
+
+if __name__ == "__main__":
+    main()
