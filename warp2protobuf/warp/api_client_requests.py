@@ -88,68 +88,91 @@ def _parse_sse_stream(response, show_all_events=True):
                 return None
     
     current_data = ""
+    line_count = 0
     
-    # Iterate over lines from streaming response
-    for line in response.iter_lines(decode_unicode=True):
-        if line.startswith("data:"):
-            payload = line[5:].strip()
-            if not payload:
-                continue
-            if payload == "[DONE]":
-                logger.info("Received [DONE] marker, ending processing")
-                break
-            current_data += payload
+    logger.info("Starting to iterate over response content...")
+    
+    # Use iter_content instead of iter_lines for more reliable streaming
+    # iter_lines() can fail silently when content-type is missing
+    buffer = b""
+    for chunk in response.iter_content(chunk_size=8192, decode_unicode=False):
+        if not chunk:
             continue
         
-        if (line.strip() == "") and current_data:
-            raw_bytes = _parse_payload_bytes(current_data)
-            current_data = ""
-            if raw_bytes is None:
-                logger.debug("Skipping unparseable SSE data block")
-                continue
+        buffer += chunk
+        # Process complete lines from buffer
+        while b"\n" in buffer:
+            line_bytes, buffer = buffer.split(b"\n", 1)
             try:
-                event_data = protobuf_to_dict(raw_bytes, "warp.multi_agent.v1.ResponseEvent")
-            except Exception as parse_error:
-                logger.debug(f"Failed to parse event: {str(parse_error)[:100]}")
+                line = line_bytes.decode('utf-8').rstrip('\r')
+            except UnicodeDecodeError:
+                logger.warning(f"Failed to decode line, skipping")
                 continue
             
-            event_count += 1
-            event_type = _get_event_type(event_data)
-            logger.info(f"🔄 Event #{event_count}: {event_type}")
-            if show_all_events:
-                logger.debug(f"   📋 Event data: {str(event_data)[:200]}...")
+            line_count += 1
+            if line_count <= 10:  # Log first 10 lines to see what we're getting
+                logger.info(f"📥 Raw line #{line_count}: {repr(line[:200])}")
             
-            if "init" in event_data:
-                init_data = event_data["init"]
-                conversation_id = init_data.get("conversation_id", conversation_id)
-                task_id = init_data.get("task_id", task_id)
-                logger.info(f"Session initialized: {conversation_id}")
+            if line.startswith("data:"):
+                payload = line[5:].strip()
+                if not payload:
+                    continue
+                if payload == "[DONE]":
+                    logger.info("Received [DONE] marker, ending processing")
+                    break
+                current_data += payload
+                continue
             
-            client_actions = _get(event_data, "client_actions", "clientActions")
-            if isinstance(client_actions, dict):
-                actions = _get(client_actions, "actions", "Actions") or []
-                for i, action in enumerate(actions):
-                    append_data = _get(action, "append_to_message_content", "appendToMessageContent")
-                    if isinstance(append_data, dict):
-                        message = append_data.get("message", {})
-                        agent_output = _get(message, "agent_output", "agentOutput") or {}
-                        text_content = agent_output.get("text", "")
-                        if text_content:
-                            complete_response.append(text_content)
-                            logger.info(f"   📝 Text: {text_content[:100]}...")
-                    
-                    messages_data = _get(action, "add_messages_to_task", "addMessagesToTask")
-                    if isinstance(messages_data, dict):
-                        messages = messages_data.get("messages", [])
-                        task_id = messages_data.get("task_id", messages_data.get("taskId", task_id))
-                        for message in messages:
-                            if _get(message, "agent_output", "agentOutput") is not None:
-                                agent_output = _get(message, "agent_output", "agentOutput") or {}
-                                text_content = agent_output.get("text", "")
-                                if text_content:
-                                    complete_response.append(text_content)
-                                    logger.info(f"   📝 Message: {text_content[:100]}...")
+            if (line.strip() == "") and current_data:
+                raw_bytes = _parse_payload_bytes(current_data)
+                current_data = ""
+                if raw_bytes is None:
+                    logger.debug("Skipping unparseable SSE data block")
+                    continue
+                try:
+                    event_data = protobuf_to_dict(raw_bytes, "warp.multi_agent.v1.ResponseEvent")
+                except Exception as parse_error:
+                    logger.debug(f"Failed to parse event: {str(parse_error)[:100]}")
+                    continue
+                
+                event_count += 1
+                event_type = _get_event_type(event_data)
+                logger.info(f"🔄 Event #{event_count}: {event_type}")
+                if show_all_events:
+                    logger.debug(f"   📋 Event data: {str(event_data)[:200]}...")
+                
+                if "init" in event_data:
+                    init_data = event_data["init"]
+                    conversation_id = init_data.get("conversation_id", conversation_id)
+                    task_id = init_data.get("task_id", task_id)
+                    logger.info(f"Session initialized: {conversation_id}")
+                
+                client_actions = _get(event_data, "client_actions", "clientActions")
+                if isinstance(client_actions, dict):
+                    actions = _get(client_actions, "actions", "Actions") or []
+                    for i, action in enumerate(actions):
+                        append_data = _get(action, "append_to_message_content", "appendToMessageContent")
+                        if isinstance(append_data, dict):
+                            message = append_data.get("message", {})
+                            agent_output = _get(message, "agent_output", "agentOutput") or {}
+                            text_content = agent_output.get("text", "")
+                            if text_content:
+                                complete_response.append(text_content)
+                                logger.info(f"   📝 Text: {text_content[:100]}...")
+                        
+                        messages_data = _get(action, "add_messages_to_task", "addMessagesToTask")
+                        if isinstance(messages_data, dict):
+                            messages = messages_data.get("messages", [])
+                            task_id = messages_data.get("task_id", messages_data.get("taskId", task_id))
+                            for message in messages:
+                                if _get(message, "agent_output", "agentOutput") is not None:
+                                    agent_output = _get(message, "agent_output", "agentOutput") or {}
+                                    text_content = agent_output.get("text", "")
+                                    if text_content:
+                                        complete_response.append(text_content)
+                                        logger.info(f"   📝 Message: {text_content[:100]}...")
     
+    logger.info(f"Finished iterating. Total lines processed: {line_count}")
     full_response = "".join(complete_response)
     logger.info("="*60)
     logger.info("📊 SSE STREAM SUMMARY")
@@ -205,6 +228,18 @@ async def send_protobuf_to_warp_api(
             return f"❌ Warp API Error (HTTP {response.status_code}): {error_content}", None, None
         
         logger.info(f"✅ Received HTTP {response.status_code} response")
+        content_type = response.headers.get('content-type', 'NOT SET')
+        logger.info(f"Content-Type: {content_type}")
+        logger.info(f"Transfer-Encoding: {response.headers.get('transfer-encoding', 'NOT SET')}")
+        
+        # WORKAROUND: If content-type is missing but we requested text/event-stream,
+        # assume the response is SSE. This handles cases where the intercept server
+        # doesn't preserve or the Warp API doesn't set the content-type header.
+        if content_type == 'NOT SET' and headers.get('accept') == 'text/event-stream':
+            logger.warning("⚠️  Content-Type header is missing from response!")
+            logger.warning("⚠️  We requested 'text/event-stream' so assuming SSE format")
+            logger.warning("⚠️  This is likely a bug in the upstream server or intercept layer")
+        
         logger.info("Starting to process SSE event stream...")
         
         try:
